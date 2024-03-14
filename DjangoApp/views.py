@@ -14,6 +14,7 @@ Users = db["Users"]
 
 def index(request):
     return HttpResponse("<h1>Welcome to <u>Weather App API<u>!</h1>")
+
 def UsersView(request):
     if (request.method == "POST"):
         body = json.loads(request.body.decode("utf-8"))
@@ -33,12 +34,14 @@ def UsersView(request):
         data = {
             "Inserted_id": str(result.inserted_id)
         }
-        return JsonResponse(data, safe=False, status=200)
+        return JsonResponse(data, status=200)
     if (request.method == "DELETE"):
         body = json.loads(request.body.decode("utf-8"))
         result = Authorization(body)
         if (result is None or result["Role"] != "Admin"):
             return JsonResponse({"Success": False, "Message": "Authorization failed"}, status=401)
+        if "Username" not in body:
+            return JsonResponse({"Success": False, "Message": "Username not provided"}, status=400)
         userToDelete = {
             "Username": body["Username"]
         }
@@ -48,9 +51,35 @@ def UsersView(request):
         data = {
             "deleted_count": result.deleted_count
         }
-        data = json.dumps(data)
-        return JsonResponse(data, safe=False, status=200)
-    
+        return JsonResponse(data, status=200)
+    if (request.method == "PUT"):
+        body = json.loads(request.body.decode("utf-8"))
+        result = Authorization(body)
+        if result is None or result["Role"] != "Admin":
+            return JsonResponse({"Success": False, "Message": "Authorization failed"}, status=401)
+        if "Username" not in body:
+            return JsonResponse({"Success": False, "Message": "Username not provided"}, status=400)
+        user_query = {
+            "Username": body["Username"]
+        }
+        existing_user = Users.find_one(user_query)
+        if existing_user is None:
+            return JsonResponse({"Success": False, "Message": "User not found"}, status=404)
+        update_data = {}
+        if "Password" in body:
+            update_data["Password"] = Hash_Password(body["Password"])
+        if "FName" in body:
+            update_data["FName"] = body["FName"]
+        if "LName" in body:
+            update_data["LName"] = body["LName"]
+        if "Role" in body:
+            update_data["Role"] = body["Role"]
+        update_data["LastLogin"] = datetime.datetime.now(datetime.timezone.utc)
+        result = Users.update_one(user_query, {"$set": update_data})
+        if result.modified_count > 0:
+            return JsonResponse({"Success": True, "Message": "User details updated successfully"}, status=200)
+        else:
+            return JsonResponse({"Success": False, "Message": "Failed to update user details"}, status=400)
     return JsonResponse({"Error": "Method not allowed"}, status=405)
 
 def LoginView(request):
@@ -73,6 +102,11 @@ def Authorization(body):
     }
     print(user)
     result = Users.find_one(user)
+    update_data = {
+        "LastLogin": datetime.datetime.now(datetime.timezone.utc)
+    }
+    Users.update_one(user, {"$set": update_data})
+    # Should return role instead
     return result
 
 def Hash_Password(password):
@@ -81,7 +115,3 @@ def Hash_Password(password):
     sha256_hash.update(password_bytes)
     hashed_password = sha256_hash.hexdigest()
     return hashed_password
-
-        
-
-        
