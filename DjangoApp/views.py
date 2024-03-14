@@ -3,7 +3,7 @@ from django.http import HttpResponse, JsonResponse
 from django.shortcuts import render
 import pymongo
 import datetime
-
+import hashlib
 # Create your views here.
 
 client = pymongo.MongoClient("mongodb+srv://student:student@weatherreadingsdb.hiue8df.mongodb.net/")
@@ -53,7 +53,35 @@ def UsersView(request):
         userToChange = {
             "username": body["username"]
         }
+        return
+def LoginView(request):
+    if (request.method == "PATCH"):
+        body = json.loads(request.body.decode("utf-8"))
+        result = Authorization(body)
+        print(result)
+        if (result is None):
+            return JsonResponse({"success": False, "message": "Username or password incorrect"}, status=400)
+        return JsonResponse({"success": True, "message": "Login successful"}, status=200)
+    return JsonResponse({"error": "Method not allowed"}, status=405)
 
+def Authorization(body):
+    username = body["Authentication"]["Username"]
+    password = body["Authentication"]["Password"]
+    hashed_password = Hash_Password(password)
+    user = {
+        "Username": username,
+        "Password": hashed_password
+    }
+    print(user)
+    result = Users.find_one(user)
+    return result
+
+def Hash_Password(password):
+    password_bytes = password.encode('utf-8')
+    sha256_hash = hashlib.sha256()
+    sha256_hash.update(password_bytes)
+    hashed_password = sha256_hash.hexdigest()
+    return hashed_password
 
         
 
