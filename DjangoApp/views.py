@@ -16,53 +16,52 @@ def index(request):
     return HttpResponse("<h1>Welcome to <u>Weather App API<u>!</h1>")
 def UsersView(request):
     if (request.method == "POST"):
-        # Need to check privileges(parse username and password).
-        body = json.loads(request.body.decode("uft-8"))
-        if (Users.find_one({"username": body["username"]}) is None):
-            return
+        body = json.loads(request.body.decode("utf-8"))
+        result = Authorization(body)
+        if (result is None or result["Role"] != "Admin"):
+            return JsonResponse({"Success": False, "Message": "Authorization failed"}, status=401)
         newUser = {
-            "username": body["username"],
-            "password": body["password"],
-            "fname": body["fname"],
-            "lname": body["lname"],
-            "role": body["role"],
-            "lastlogin": datetime.datetime.now(tz=datetime.timezone.utc)
+            "Username": body["Username"],
+            "Password": Hash_Password(body["Password"]),
+            "FName": body["FName"],
+            "LName": body["LName"],
+            "Role": body["Role"],
+            "LastLogin": datetime.datetime.now(tz=datetime.timezone.utc),
+            "Token": "",
         }
         result = Users.insert_one(newUser)
         data = {
-            "inserted_id": str(result.inserted_id)
+            "Inserted_id": str(result.inserted_id)
         }
-        return JsonResponse(data, safe=False)
+        return JsonResponse(data, safe=False, status=200)
     if (request.method == "DELETE"):
-        # Need to check privileges(parse username and password).
-        body = json.loads(request.body.decode("uft-8"))
+        body = json.loads(request.body.decode("utf-8"))
+        result = Authorization(body)
+        if (result is None or result["Role"] != "Admin"):
+            return JsonResponse({"Success": False, "Message": "Authorization failed"}, status=401)
         userToDelete = {
-            "username": body["username"]
+            "Username": body["Username"]
         }
         if (Users.find_one(userToDelete) is None):
-            return
+            return JsonResponse({"Success": False, "Message": "Couldn't Find Username"}, status=404)
         result = Users.delete_one(userToDelete)
         data = {
             "deleted_count": result.deleted_count
         }
         data = json.dumps(data)
-        return JsonResponse(data, safe=False)
-    if (request.method == "POST"):
-        # Need to check privileges(parse username and password).
-        body = json.loads(request.body.decode("uft-8"))
-        userToChange = {
-            "username": body["username"]
-        }
-        return
+        return JsonResponse(data, safe=False, status=200)
+    
+    return JsonResponse({"Error": "Method not allowed"}, status=405)
+
 def LoginView(request):
     if (request.method == "PATCH"):
         body = json.loads(request.body.decode("utf-8"))
         result = Authorization(body)
         print(result)
         if (result is None):
-            return JsonResponse({"success": False, "message": "Username or password incorrect"}, status=400)
-        return JsonResponse({"success": True, "message": "Login successful"}, status=200)
-    return JsonResponse({"error": "Method not allowed"}, status=405)
+            return JsonResponse({"Success": False, "Message": "Authorization failed"}, status=400)
+        return JsonResponse({"Success": True, "Message": "Authorization successful"}, status=200)
+    return JsonResponse({"Error": "Method not allowed"}, status=405)
 
 def Authorization(body):
     username = body["Authentication"]["Username"]
