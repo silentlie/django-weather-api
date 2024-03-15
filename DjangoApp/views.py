@@ -6,14 +6,17 @@ import datetime
 import hashlib
 # Create your views here.
 
+# Connection to the database & collections
 client = pymongo.MongoClient("mongodb+srv://student:student@weatherreadingsdb.hiue8df.mongodb.net/")
 db = client["WeatherDataBase"]
 Readings = db["Readings"]
 Stations = db["Stations"]
 Users = db["Users"]
+
 # Just a index holder
 def index(request):
     return HttpResponse("<h1>Welcome to <u>Weather App API<u>!</h1>")
+
 # UsersView endpoint for managing users
 def UsersView(request):
     if (request.method == "POST"):
@@ -83,6 +86,7 @@ def UsersView(request):
         else:
             return JsonResponse({"Success": False, "Message": "Failed to update user details"}, status=400)
     return JsonResponse({"Error": "Method not allowed"}, status=405)
+
 # This is the login endpoint, right now it works like checking if the account is legit
 def LoginView(request):
     if (request.method == "PATCH"):
@@ -93,6 +97,7 @@ def LoginView(request):
             return JsonResponse({"Success": False, "Message": "Authorization failed"}, status=400)
         return JsonResponse({"Success": True, "Message": "Authorization successful"}, status=200)
     return JsonResponse({"Error": "Method not allowed"}, status=405)
+
 # Check point function of every request for authorization
 def Authorization(body):
     username = body["Authentication"]["Username"]
@@ -104,12 +109,18 @@ def Authorization(body):
     }
     print(user)
     result = Users.find_one(user)
+    # Return role from the user (if found)
+    if result:
+        role = {
+            "Role": result.get("Role", None),
+        }
     update_data = {
         "LastLogin": datetime.datetime.now(datetime.timezone.utc)
     }
     Users.update_one(user, {"$set": update_data})
     # Should return role instead
-    return result
+    return role
+
 # Hash password function
 def Hash_Password(password):
     password_bytes = password.encode('utf-8')
