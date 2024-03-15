@@ -30,7 +30,7 @@ def UsersView(request):
             "LName": body["LName"],
             "Role": body["Role"],
             "LastLogin": datetime.datetime.now(tz=datetime.timezone.utc),
-            "Token": "",
+            "Token": None,
         }
         result = Users.insert_one(newUser)
         data = {
