@@ -11,16 +11,18 @@ db = client["WeatherDataBase"]
 Readings = db["Readings"]
 Stations = db["Stations"]
 Users = db["Users"]
-
+# Just a index holder
 def index(request):
     return HttpResponse("<h1>Welcome to <u>Weather App API<u>!</h1>")
-
+# UsersView endpoint for managing users
 def UsersView(request):
     if (request.method == "POST"):
         body = json.loads(request.body.decode("utf-8"))
         result = Authorization(body)
         if (result is None or result["Role"] != "Admin"):
             return JsonResponse({"Success": False, "Message": "Authorization failed"}, status=401)
+        if (Users.find_one({"Username": body["Username"]}) is not None):
+            return JsonResponse({"Success": False, "Message": "Couldn't Find Username"}, status=404)
         newUser = {
             "Username": body["Username"],
             "Password": Hash_Password(body["Password"]),
@@ -46,7 +48,7 @@ def UsersView(request):
             "Username": body["Username"]
         }
         if (Users.find_one(userToDelete) is None):
-            return JsonResponse({"Success": False, "Message": "Couldn't Find Username"}, status=404)
+            return JsonResponse({"Success": False, "Message": "Couldn't Find Username"}, status=403)
         result = Users.delete_one(userToDelete)
         data = {
             "deleted_count": result.deleted_count
@@ -81,7 +83,7 @@ def UsersView(request):
         else:
             return JsonResponse({"Success": False, "Message": "Failed to update user details"}, status=400)
     return JsonResponse({"Error": "Method not allowed"}, status=405)
-
+# This is the login endpoint, right now it works like checking if the account is legit
 def LoginView(request):
     if (request.method == "PATCH"):
         body = json.loads(request.body.decode("utf-8"))
@@ -91,7 +93,7 @@ def LoginView(request):
             return JsonResponse({"Success": False, "Message": "Authorization failed"}, status=400)
         return JsonResponse({"Success": True, "Message": "Authorization successful"}, status=200)
     return JsonResponse({"Error": "Method not allowed"}, status=405)
-
+# Check point function of every request for authorization
 def Authorization(body):
     username = body["Authentication"]["Username"]
     password = body["Authentication"]["Password"]
@@ -108,7 +110,7 @@ def Authorization(body):
     Users.update_one(user, {"$set": update_data})
     # Should return role instead
     return result
-
+# Hash password function
 def Hash_Password(password):
     password_bytes = password.encode('utf-8')
     sha256_hash = hashlib.sha256()
