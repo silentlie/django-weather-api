@@ -1,8 +1,10 @@
 import json
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import render
+from bson.json_util import dumps
 import pymongo
 import datetime
+from dateutil.relativedelta import relativedelta   # pip install python-dateutil to import
 import hashlib
 # Create your views here.
 
@@ -10,22 +12,31 @@ import hashlib
 client = pymongo.MongoClient("mongodb+srv://student:student@weatherreadingsdb.hiue8df.mongodb.net/")
 db = client["WeatherDataBase"]
 Readings = db["Readings"]
-Stations = db["Stations"]
+Sensors = db["Sensors"]
 Users = db["Users"]
 
-# Just a index holder
+# Just an index holder
 def index(request):
     return HttpResponse("<h1>Welcome to <u>Weather App API<u>!</h1>")
 
-# UsersView endpoint for managing users
+## ENDPOINT >> UsersView -- for managing users #####
+    # /users > POST
 def UsersView(request):
     if (request.method == "POST"):
         body = json.loads(request.body.decode("utf-8"))
-        result = Authorization(body)
-        if (result is None or result["Role"] != "Admin"):
+        role = Authorization(body)
+
+        # Allow access only if role is Admin or Teacher
+        if role != "Admin" and role != "Teacher" :
             return JsonResponse({"Success": False, "Message": "Authorization failed"}, status=401)
+        
+        # Return error message if user already exists
         if (Users.find_one({"Username": body["Username"]}) is not None):
-            return JsonResponse({"Success": False, "Message": "Couldn't Find Username"}, status=404)
+            return JsonResponse({"Success": False, "Message": "User already exists"}, status=404)
+        
+        # Collate new user details from input data and calculate lastlogin datetime
+        ## NOTE: Should check for missing information here and provide a useful error message if missing
+                # i.e. Mandatory fields = Username, Password, Role (FName, LName optional?)
         newUser = {
             "Username": body["Username"],
             "Password": Hash_Password(body["Password"]),
@@ -35,35 +46,52 @@ def UsersView(request):
             "LastLogin": datetime.datetime.now(tz=datetime.timezone.utc),
             "Token": None,
         }
+
+        # Insert the new user
         result = Users.insert_one(newUser)
+
+        # Return the ID of the new user
         data = {
             "Inserted_id": str(result.inserted_id)
         }
         return JsonResponse(data, status=200)
+    
+    # /users > DELETE
     if (request.method == "DELETE"):
         body = json.loads(request.body.decode("utf-8"))
-        result = Authorization(body)
-        if (result is None or result["Role"] != "Admin"):
+        role = Authorization(body)
+
+        # Allow access only if role is Admin or Teacher
+        if role != "Admin" and role != "Teacher" :
             return JsonResponse({"Success": False, "Message": "Authorization failed"}, status=401)
+        
+        # Return error message if the username does not exist (in request details)
         if "Username" not in body:
             return JsonResponse({"Success": False, "Message": "Username not provided"}, status=400)
-        userToDelete = {
-            "Username": body["Username"]
-        }
-        if (Users.find_one(userToDelete) is None):
-            return JsonResponse({"Success": False, "Message": "Couldn't Find Username"}, status=403)
-        result = Users.delete_one(userToDelete)
-        data = {
-            "deleted_count": result.deleted_count
-        }
-        return JsonResponse(data, status=200)
+        
+        # Search for the username in the collection
+        userToDelete = {"Username": body["Username"]}
+
+        # If username is found, delete the user and return confirmation
+        if userToDelete:
+            result = Users.delete_one(userToDelete)
+            data = {"deleted_count": result.deleted_count}
+            return JsonResponse(data, status=200)
+        
+        # Username is not found, return error message
+        return JsonResponse({"Success": False, "Message": "Couldn't Find Username"}, status=403)
+          
+    # /users > PUT
     if (request.method == "PUT"):
         body = json.loads(request.body.decode("utf-8"))
-        result = Authorization(body)
-        if result is None or result["Role"] != "Admin":
+        role = Authorization(body)
+
+        if role != "Admin" and role != "Teacher" :
             return JsonResponse({"Success": False, "Message": "Authorization failed"}, status=401)
+        
         if "Username" not in body:
             return JsonResponse({"Success": False, "Message": "Username not provided"}, status=400)
+        
         user_query = {
             "Username": body["Username"]
         }
@@ -85,19 +113,274 @@ def UsersView(request):
             return JsonResponse({"Success": True, "Message": "User details updated successfully"}, status=200)
         else:
             return JsonResponse({"Success": False, "Message": "Failed to update user details"}, status=400)
+
+    # Returns error: method not allowed for any other methods
     return JsonResponse({"Error": "Method not allowed"}, status=405)
 
+
+## ENDPOINT >> /readings -- for managing weather readings #####
+def ReadingsView (request):
+    # /readings GET
+    # Get request to obtain specific reading details based on inputs > SensorName, DateTime
+    if(request.method == "GET"):
+
+        deviceName = request.GET.get('DeviceName')
+        readingDateTime = request.GET.get('DateTime')
+
+        # convert date time string (in format YYYY-MM-DD HH:MM:SS) to datetime object
+        convertedDateTime = datetime.datetime.strptime(readingDateTime,'%Y-%m-%d %H:%M:%S')
+
+        reading = Readings.find_one({"Device Name": deviceName, "Time": convertedDateTime})
+
+        # Return temperature, atmospheric pressure, radiation & precipitation (if found)
+        if reading:
+            returnData = {
+                "Temperature(°C)": reading.get("Temperature (°C)", None),
+                "Atmospheric Pressure (kPa)": reading.get("Atmospheric Pressure (kPa)", None),
+                "Solar Radiation (W/m2)": reading.get("Solar Radiation (W/m2)", None),
+                "Precipitation mm/h": reading.get("Precipitation mm/h", None)
+            }
+
+        return JsonResponse(returnData)
+
+    # /readings POST NOTE *********Currently a work in progress
+    if(request.method == "POST"):
+        body = json.loads(request.body.decode("utf-8"))
+        role = Authorization(body)
+
+        if role != "Admin" and role != "Teacher" and role != "Sensor":
+            return JsonResponse({"Success": False, "Message": "Authorization failed"}, status=401)
+        
+        # Return error message if reading already exists (Device Name and Time)
+        if (Users.find_one({"Device Name": body["Device Name"],"Time": body["Time"]}) is not None):
+            return JsonResponse({"Success": False, "Message": "Reading already exists"}, status=404)
+        
+        # Collate new readings details from input data and get latitude and longitude
+        latitude_longitude = GetLatitudeLongitude(body)
+        
+        ## NOTE: Should check for missing information here and provide a useful error message if missing
+        newReading = {
+            "DeviceName": body["DeviceName"],
+            "Precipitation mm/h": body["Precipitation mm/h"],
+            "Time": body["Time"],
+            "Latitude": latitude_longitude["Latitude"],
+            "Longitude": latitude_longitude["Longitude"],
+            "Temperature (°C)": body["Temperature (°C)"],
+            "Atmospheric Pressure (kPa)": body["Atmospheric Pressure (kPa)"],
+            "Max Wind Speed (m/s)": body["Max Wind Speed (m/s)"],
+            "Solar Radiation (W/m2)": body["Solar Radiation (W/m2)"],
+            "Vapor Pressure (kPa)": body["Vapor Pressure (kPa)"],
+            "Humidity (%)": body["Humidity (%)"],
+            "Wind Direction (°)": body["Wind Direction (°)"]
+        }
+
+        # Insert the new sensor
+        result = Readings.insert_one(newReading)
+
+        # Return the ID of the new reading
+        data = {
+            "Inserted_id": str(result.inserted_id)
+        }
+        return JsonResponse(data, status=200)
+
+    # Returns error: method not allowed for any other methods
+    return JsonResponse({"Error": "Method not allowed"}, status=405)
+
+## ENDPOINT >> /sensors -- for managing sensors ##
+# /sensors > POST
+def SensorsView(request):
+    # /sensors > GET NOTE for use in dev testing only > Find unique entries for 'Device Name' (under readings)
+    if (request.method == "GET"):
+        unique_device_names = Readings.distinct('Device Name')
+
+        return JsonResponse(unique_device_names, safe=False)
+
+    # /sensors > POST
+    if (request.method == "POST"):
+        body = json.loads(request.body.decode("utf-8"))
+        role = Authorization(body)
+
+        # Allow access only if role is Admin
+        if role != "Admin" :
+            return JsonResponse({"Success": False, "Message": "Authorization failed"}, status=401)
+        
+        # Return error message if sensor already exists
+        if (Users.find_one({"DeviceName": body["DeviceName"]}) is not None):
+            return JsonResponse({"Success": False, "Message": "Sensor already exists"}, status=404)
+        
+        # Collate new sensor details from input data
+        ## NOTE: Should check for missing information here and provide a useful error message if missing
+        newSensor = {
+            "DeviceName": body["DeviceName"],
+            "Latitude": body["Latitude"],
+            "Longitude": body["Longitude"],
+        }
+
+        # Insert the new sensor
+        result = Sensors.insert_one(newSensor)
+
+        # Return the ID of the new sensor
+        data = {
+            "Inserted_id": str(result.inserted_id)
+        }
+        return JsonResponse(data, status=200)
+    
+    # /sensors > DELETE
+    if (request.method == "DELETE"):
+        body = json.loads(request.body.decode("utf-8"))
+        role = Authorization(body)
+
+        # Allow access only if role is Admin
+        if role != "Admin":
+            return JsonResponse({"Success": False, "Message": "Authorization failed"}, status=401)
+        
+        # Return error message if the username does not exist (in request details)
+        if "DeviceName" not in body:
+            return JsonResponse({"Success": False, "Message": "DeviceName not provided"}, status=400)
+        
+        # Search for the username in the collection
+        sensorToDelete = {"DeviceName": body["DeviceName"]}
+
+        # If username is found, delete the user and return confirmation
+        if sensorToDelete:
+            result = Sensors.delete_one(sensorToDelete)
+            data = {"deleted_count": result.deleted_count}
+            return JsonResponse(data, status=200)
+        
+        # Username is not found, return error message
+        return JsonResponse({"Success": False, "Message": "Couldn't Find DeviceName"}, status=403)
+
+    # Returns error: method not allowed for any other methods
+    return JsonResponse({"Error": "Method not allowed"}, status=405)
+
+
+## ENDPOINT >> analysis -- NOT IN USE  #####
+# /analysis > POST
+def AnalysisView(request):
+
+    return ""
+
+
+## ENDPOINT >> /analysis/max -- for calculating max value of Temperature or Precipitation of readings #####
+def AnalysisMaxView(request):
+    # examples of request parameters
+    # /analysis/max?Find=Temperature&StartDate=2020-01-01&EndDate=2021-04-01
+    # /analysis/max?Find=Precipitation&DeviceName=Woodford_Sensor&StartDate=2020-01-01&EndDate=2020-04-01
+    # /analysis/max?Find=Precipitation&DeviceName=Woodford_Sensor&StartDate=2020-01-01&EndDate=2021-04-01
+    # /analysis/max GET
+    if(request.method == "GET"):
+
+        findField = request.GET.get('Find')
+        deviceName = request.GET.get('DeviceName')
+
+        currentDate = datetime.datetime.now()
+        dateRange = None
+
+        # Calculate dates for a five month range (prior to now)
+        # Start date and End date
+        if request.GET.get('StartDate') and request.GET.get('EndDate'):
+            dateRange = True
+            # convert date time strings (in format YYYY-MM-DD HH:MM:SS) to datetime object
+            startDate = datetime.datetime.strptime(request.GET.get('StartDate'),'%Y-%m-%d')
+            endDate = datetime.datetime.strptime(request.GET.get('EndDate'),'%Y-%m-%d')
+
+        # Return error for bad request if only one of start or end date is included
+        elif request.GET.get('StartDate') or request.GET.get('EndDate'):
+            return JsonResponse({"Error": "Paramaters need to include a start and end date"}, status=400)
+        
+        else:
+            dateRange = False
+            # https://www.geeksforgeeks.org/how-to-add-and-subtract-days-using-datetime-in-python/
+            startDate = currentDate - relativedelta(months = 5)
+            endDate = currentDate
+        
+        # Create the data filters
+        # Data filter including Sensor Name
+        if deviceName:
+            dateFilter = {
+                "Device Name": deviceName,
+                "Time": {
+                    "$gte": startDate,
+                    "$lte": endDate
+                }
+            }
+        # Data filter excluding Sensor Name
+        else:
+            dateFilter = {
+                "Time": {
+                    "$gte": startDate,
+                    "$lte": endDate
+                }
+            }
+
+        # Query the Readings collection
+        maximumReading = Readings.find(dateFilter).sort('Precipitation mm/h', -1).limit(1)
+
+        # Initialise returnData and errorMessage to None
+        returnData = None
+
+        # Return temperature, atmospheric pressure, radiation & precipitation (if found)
+        if maximumReading:
+            for result in maximumReading:
+                if findField == "Precipitation":
+                    returnData = {
+                        "Device Name": result.get("Device Name", None),
+                        "Time": result.get("Time", None),
+                        "Precipitation mm/h": result.get("Precipitation mm/h", None)
+                    }
+
+                elif findField == "Temperature":
+                    returnData = {
+                        "Device Name": result.get("Device Name", None),
+                        "Time": result.get("Time", None),
+                        "Temperature (°C)": result.get("Temperature (°C)", None)     
+                    }
+
+        if returnData is not None:
+            return JsonResponse(returnData)
+        
+        # No Content
+        if dateRange == True:
+            return  JsonResponse({"Success": False, "Message": "No records found within the specified date range"}, status=204)
+        elif dateRange == False:               
+            return JsonResponse({"Success": False, "Message": "No records found within last 5 months"}, status=204)
+
+    # Returns error: method not allowed for any other methods
+    return JsonResponse({"Error": "Method not allowed"}, status=405)        
+    
+# ENDPOINT >> /users/role -- use for testing > Returns the role of the user logging in
+def UsersRoleView(request):
+    # /users > PATCH
+    if (request.method == "PATCH"):
+        body = json.loads(request.body.decode("utf-8"))
+        role = Authorization(body)
+        print(role)
+
+        if role:
+            return JsonResponse({"Success": True, "Message": "Authorisation successful", "Role": role}, status=200)
+
+        return JsonResponse({"Success": False, "Message": "Authorisation failed"}, status=400)     
+
+    # Returns error: method not allowed for any other methods        
+    return JsonResponse({"Error": "Method not allowed"}, status=405)
+
+
+## ENDPOINT >> /login -- for managing user login #####
 # This is the login endpoint, right now it works like checking if the account is legit
 def LoginView(request):
+    # /login PATCH
     if (request.method == "PATCH"):
         body = json.loads(request.body.decode("utf-8"))
         result = Authorization(body)
         print(result)
-        if (result is None):
-            return JsonResponse({"Success": False, "Message": "Authorization failed"}, status=400)
-        return JsonResponse({"Success": True, "Message": "Authorization successful"}, status=200)
+        if result:
+            return JsonResponse({"Success": True, "Message": "Authorization successful"}, status=200)
+        return JsonResponse({"Success": False, "Message": "Authorization failed"}, status=400)
+
+    # Returns error: method not allowed for any other methods        
     return JsonResponse({"Error": "Method not allowed"}, status=405)
 
+## FUNCTIONS #########################################################################################
 # Check point function of every request for authorization
 def Authorization(body):
     username = body["Authentication"]["Username"]
@@ -111,15 +394,18 @@ def Authorization(body):
     result = Users.find_one(user)
     # Return role from the user (if found)
     if result:
-        role = {
-            "Role": result.get("Role", None),
+        # Update the last login date for the user
+        update_data = {
+            "LastLogin": datetime.datetime.now(datetime.timezone.utc)
         }
-    update_data = {
-        "LastLogin": datetime.datetime.now(datetime.timezone.utc)
-    }
-    Users.update_one(user, {"$set": update_data})
-    # Should return role instead
-    return role
+        Users.update_one(user, {"$set": update_data})
+        #role = {
+        #    "Role": result.get("Role", None),
+        #}
+        # Save the role > return this
+        role = result.get("Role", None)
+        return role
+    return None
 
 # Hash password function
 def Hash_Password(password):
@@ -128,3 +414,16 @@ def Hash_Password(password):
     sha256_hash.update(password_bytes)
     hashed_password = sha256_hash.hexdigest()
     return hashed_password
+
+# Get latitude and longitude for a Sensor
+def GetLatitudeLongitude(body):
+    deviceName = body["Device Name"]
+    result = Sensors.find_one(deviceName)
+    # Return latitude and longitude (if found)
+    if result:
+        latitude_longitude = {
+            "Latitude": result.get("Latitude", None),
+            "Longitude": result.get("Longitude", None)
+        }
+        return latitude_longitude
+    return None
