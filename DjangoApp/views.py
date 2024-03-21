@@ -2,6 +2,7 @@ import json
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import render
 from bson.json_util import dumps
+from bson import ObjectId
 import pymongo
 import datetime
 from dateutil.relativedelta import relativedelta   # pip install python-dateutil to import
@@ -61,20 +62,37 @@ def UsersView(request):
         body = json.loads(request.body.decode("utf-8"))
         role = Authorization(body)
 
+        id = body.get("_id")
+        objId = ObjectId(id)
+
         # Allow access only if role is Admin or Teacher
         if role != "Admin" and role != "Teacher" :
             return JsonResponse({"Success": False, "Message": "Authorization failed"}, status=401)
         
         # Return error message if the username does not exist (in request details)
-        if "Username" not in body:
-            return JsonResponse({"Success": False, "Message": "Username not provided"}, status=400)
+        #if "Username" not in body:
+        #    return JsonResponse({"Success": False, "Message": "Username not provided"}, status=400)
         
         # Search for the username in the collection
-        userToDelete = {"Username": body["Username"]}
+        #userToDelete = {"Username": body["Username"]}
 
-        # If username is found, delete the user and return confirmation
-        if userToDelete:
-            result = Users.delete_one(userToDelete)
+        # Search for User by ID
+        # Return error message if the user ID does not exist (in request details)
+        if "_id" not in body:
+            return JsonResponse({"Success": False, "Message": "User ID not provided"}, status=400)
+        
+        # Search for the username in the collection
+        idToDelete = {"_id": objId}
+
+        # If ID is found, delete the user and return confirmation
+        # if userToDelete:
+        #    result = Users.delete_one(userToDelete)
+        #    data = {"deleted_count": result.deleted_count}
+        #    return JsonResponse(data, status=200)
+        
+        # If ID is found, delete the user and return confirmation
+        if idToDelete:
+            result = Users.delete_one(idToDelete)
             data = {"deleted_count": result.deleted_count}
             return JsonResponse(data, status=200)
         
@@ -121,67 +139,120 @@ def UsersView(request):
 ## ENDPOINT >> /readings -- for managing weather readings #####
 def ReadingsView (request):
     # /readings GET
-    # Get request to obtain specific reading details based on inputs > SensorName, DateTime
     if(request.method == "GET"):
 
+        # Read in valid parameters from URL (DeviceName, DateTime, FirstTemp, SecondTemp)
         deviceName = request.GET.get('DeviceName')
         readingDateTime = request.GET.get('DateTime')
+        firstTemp = float(request.GET.get('FirstTemp'))
+        secondTemp = float(request.GET.get('SecondTemp'))
 
-        # convert date time string (in format YYYY-MM-DD HH:MM:SS) to datetime object
-        convertedDateTime = datetime.datetime.strptime(readingDateTime,'%Y-%m-%d %H:%M:%S')
+        # Get request to obtain specific reading details based on inputs > DeviceName, DateTime
+        if deviceName and readingDateTime:
+            # convert date time string (in format YYYY-MM-DD HH:MM:SS) to datetime object
+            convertedDateTime = datetime.datetime.strptime(readingDateTime,'%Y-%m-%d %H:%M:%S')
 
-        reading = Readings.find_one({"Device Name": deviceName, "Time": convertedDateTime})
+            reading = Readings.find_one({"Device Name": deviceName, "Time": convertedDateTime})
 
-        # Return temperature, atmospheric pressure, radiation & precipitation (if found)
-        if reading:
-            returnData = {
-                "Temperature(°C)": reading.get("Temperature (°C)", None),
-                "Atmospheric Pressure (kPa)": reading.get("Atmospheric Pressure (kPa)", None),
-                "Solar Radiation (W/m2)": reading.get("Solar Radiation (W/m2)", None),
-                "Precipitation mm/h": reading.get("Precipitation mm/h", None)
-            }
+            # Return temperature, atmospheric pressure, radiation & precipitation (if found)
+            if reading:
+                returnData = {
+                    "Temperature(°C)": reading.get("Temperature (°C)", None),
+                    "Atmospheric Pressure (kPa)": reading.get("Atmospheric Pressure (kPa)", None),
+                    "Solar Radiation (W/m2)": reading.get("Solar Radiation (W/m2)", None),
+                    "Precipitation mm/h": reading.get("Precipitation mm/h", None)
+                }
 
-        return JsonResponse(returnData)
+        # Get request to obtain a range of readings based on inputs > FirstTemp, SecondTemp
+        # Create a query that includes an index key:( PETER wants:(get 2 different temp and return between temprature)
+        # /readings/?firstTemp=23.00&secondTemp=23.07  
+        if firstTemp and secondTemp:
+            # Construct query to find readings within the temperature range
+            query = {'Temperature (°C)': {'$gte': firstTemp, '$lte': secondTemp}}
+        
+            # Find readings matching the temperature range and sort them by temperature in descending order
+            result = Readings.find(query).sort('Temperature (°C)', -1).limit(10)
+
+            list_cur = list(result)
+            returnData = dumps(list_cur)
+        
+    return JsonResponse(returnData, safe=False)
 
     # /readings POST NOTE *********Currently a work in progress
     if(request.method == "POST"):
         body = json.loads(request.body.decode("utf-8"))
         role = Authorization(body)
+        deviceName = body.get('Device Name')
+        readings = body.get('Readings', [])
+
+        # Print extracted readings
+        print(readings)
+
+        # Initialise messages and counters
+        # Error for skipped records
+        errMessage = ""
+        errCount = 0
+        # Count the number of weather readings to be added (this will not include duplicates)
+        numRecords = 0
 
         if role != "Admin" and role != "Teacher" and role != "Sensor":
             return JsonResponse({"Success": False, "Message": "Authorization failed"}, status=401)
-        
-        # Return error message if reading already exists (Device Name and Time)
-        if (Users.find_one({"Device Name": body["Device Name"],"Time": body["Time"]}) is not None):
-            return JsonResponse({"Success": False, "Message": "Reading already exists"}, status=404)
-        
-        # Collate new readings details from input data and get latitude and longitude
-        latitude_longitude = GetLatitudeLongitude(body)
-        
-        ## NOTE: Should check for missing information here and provide a useful error message if missing
-        newReading = {
-            "DeviceName": body["DeviceName"],
-            "Precipitation mm/h": body["Precipitation mm/h"],
-            "Time": body["Time"],
-            "Latitude": latitude_longitude["Latitude"],
-            "Longitude": latitude_longitude["Longitude"],
-            "Temperature (°C)": body["Temperature (°C)"],
-            "Atmospheric Pressure (kPa)": body["Atmospheric Pressure (kPa)"],
-            "Max Wind Speed (m/s)": body["Max Wind Speed (m/s)"],
-            "Solar Radiation (W/m2)": body["Solar Radiation (W/m2)"],
-            "Vapor Pressure (kPa)": body["Vapor Pressure (kPa)"],
-            "Humidity (%)": body["Humidity (%)"],
-            "Wind Direction (°)": body["Wind Direction (°)"]
-        }
 
-        # Insert the new sensor
-        result = Readings.insert_one(newReading)
+        # Return error message if Device does not exist
+        if (Sensors.find_one({"DeviceName": deviceName}) is None):
+            return JsonResponse({"Success": False, "Message": "Device does not exist"}, status=404)
+       
+        # Use device name to get latitude and longitude
+        latitude_longitude = GetLatitudeLongitude(deviceName)
 
-        # Return the ID of the new reading
-        data = {
-            "Inserted_id": str(result.inserted_id)
-        }
-        return JsonResponse(data, status=200)
+        # List to store all new readings
+        newReadingsList = []
+
+        for data in readings:
+            # Check if reading already exists using Device Name and Time
+            if (Readings.find_one({"Device Name": deviceName,"Time": data["Time"]}) is not None):
+                errCount += 1
+            else:
+                convertedDateTime = datetime.datetime.strptime(data.get("Time"),'%Y-%m-%d %H:%M:%S')
+                newReading = {
+                        "Device Name": deviceName,
+                        "Precipitation mm/h": data.get("Precipitation mm/h"),
+                        "Time": convertedDateTime,
+                        "Latitude": latitude_longitude["Latitude"],
+                        "Longitude": latitude_longitude["Longitude"],
+                        "Temperature (°C)": data.get("Temperature (°C)"),
+                        "Atmospheric Pressure (kPa)": data.get("Atmospheric Pressure (kPa)"),
+                        "Max Wind Speed (m/s)": data.get("Max Wind Speed (m/s)"),
+                        "Solar Radiation (W/m2)": data.get("Solar Radiation (W/m2)"),
+                        "Vapor Pressure (kPa)": data.get("Vapor Pressure (kPa)"),
+                        "Humidity (%)": data.get("Humidity (%)"),
+                        "Wind Direction (°)": data.get("Wind Direction (°)")
+                    }
+                newReadingsList.append(newReading)
+                #numRecords += 1  
+            #print("Error count" + errCount)
+            #print("New readings" + str(numRecords))
+
+        numRecords = len(newReadingsList)
+        print(numRecords)
+
+        if numRecords == 1:
+            result = Readings.insert_one(newReadingsList)
+            
+        elif  numRecords > 1:
+            result = Readings.insert_many(newReadingsList) 
+                
+        else:
+            return JsonResponse({"status":"error", "message":"Invalid request"}, status=400)
+
+        print(result)
+
+        if errCount > 1:
+            errMessage = str(errCount) + " duplicate reading not added."
+
+        returnMessage = str(numRecords) + " readings added successfully." + errMessage 
+
+        return JsonResponse({"status": "success", "message": returnMessage}, status=200)
 
     # Returns error: method not allowed for any other methods
     return JsonResponse({"Error": "Method not allowed"}, status=405)
@@ -416,9 +487,9 @@ def Hash_Password(password):
     return hashed_password
 
 # Get latitude and longitude for a Sensor
-def GetLatitudeLongitude(body):
-    deviceName = body["Device Name"]
-    result = Sensors.find_one(deviceName)
+def GetLatitudeLongitude(deviceName):
+    result = Sensors.find_one({"DeviceName": deviceName})
+
     # Return latitude and longitude (if found)
     if result:
         latitude_longitude = {
