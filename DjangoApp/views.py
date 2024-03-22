@@ -2,7 +2,7 @@ import json
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import render
 from bson.json_util import dumps
-from bson import ObjectId
+from bson.objectid import ObjectId
 import pymongo
 import datetime
 from dateutil.relativedelta import relativedelta   # pip install python-dateutil to import
@@ -153,62 +153,38 @@ def UsersView(request):
     if (request.method == "PATCH"):
         body = json.loads(request.body.decode("utf-8"))
         role = Authorization(body)
-
+        if role != "Admin":
+            return JsonResponse({"Success": False, "Message": "Authorization failed"}, status=401)
         startDate = body.get('StartDate')
         endDate = body.get('EndDate')
         currentRole = body.get("CurrentRole")
         changedRole = body.get("ChangedRole")
-
+        start_id = None
+        end_id = None
         # Read in Start date and End date
         if startDate and endDate:
-            dateRange = True
             # convert date time strings (in format YYYY-MM-DD HH:MM:SS) to datetime object
             startDate = datetime.datetime.strptime(startDate,'%Y-%m-%d')
+            print(startDate)
             endDate = datetime.datetime.strptime(endDate,'%Y-%m-%d')
+            print(endDate)
+            start_id = ObjectId.from_datetime(startDate)
+            print(start_id)
+            end_id = ObjectId.from_datetime(endDate)
+            print(end_id)
         
-        if role != "Admin":
-            return JsonResponse({"Success": False, "Message": "Authorization failed"}, status=401)
-
-        # Create a temporary collection to hold the extracted data
-        temp_collection = {}
-
-        # Create a list from Users collection
-        # Query the collection and convert the cursor to a list
-        cursor = Users.find()
-        usersList = list(cursor)      
-
-        # Iterate over the users and extract the data
-        for user in usersList:
-            object_id = user["_id"]
-            role = user["Role"]
+        query = { "_id": {"$gte": start_id, "$lte": end_id}, "Role": currentRole}
+        cursor = Users.find(query)
+        queryList = list(cursor)
+        print(queryList)
+        if queryList is None:
+            return JsonResponse({"Success": False, "Message": "Failed to update user roles"}, status=400)
+        result = Users.update_many(query,{"$set": {"Role": changedRole}})
+        changeCount = result.modified_count
+        return JsonResponse({"Success": True, "Message": f"{changeCount} user roles updated successfully"}, status=200)
+        return JsonResponse({"Success": False, "Message": "Failed to update user roles"}, status=400)
             
-            # Extract the timestamp from the ObjectId
-            timestamp = object_id.generation_time.timestamp()
-
-            # Convert the timestamp to a datetime object
-            date_created = datetime.datetime.fromtimestamp(timestamp)
-
-            # Add the extracted data to the temporary collection
-            temp_collection[object_id] = {"role": role, "date_created": date_created}
-
-        # Counter for users that match search
-        changeCount = 0
-
-        # Search for users based on the extracted date
-        for object_id, data in temp_collection.items():
-            if startDate <= data["date_created"] <= endDate and data["role"] == currentRole:
-                print(f"User ID: {object_id}, Role: {data['role']}, Date Created: {data['date_created']}")
-
-                update_query = {"$set": {"Role": changedRole}}
-                result = Users.update_one({"_id": object_id}, update_query)
         
-                if result.modified_count > 0:
-                    changeCount += 1
-
-        if changeCount > 0:
-            return JsonResponse({"Success": True, "Message": f"{changeCount} user roles updated successfully"}, status=200)
-        else:
-            return JsonResponse({"Success": False, "Message": "Failed to update user roles"}, status=400) 
     # End /users > PATCH
       
         
@@ -284,7 +260,8 @@ def ReadingsView (request):
        
         # Use device name to get latitude and longitude
         latitude_longitude = GetLatitudeLongitude(deviceName)
-
+        if latitude_longitude is None:
+            return JsonResponse({"Success": False, "Message": "latitude_longitude is None"}, status=404)
         # List to store all new readings
         newReadingsList = []
 
