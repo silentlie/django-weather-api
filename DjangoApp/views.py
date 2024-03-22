@@ -65,39 +65,55 @@ def UsersView(request):
         id = body.get("_id")
         objId = ObjectId(id)
 
+        roleForDelete = body.get("Role")
+
+        # convert date time strings (in format YYYY-MM-DD HH:MM:SS) to datetime object
+        startDate = datetime.datetime.strptime(body.get('StartDate'),'%Y-%m-%d')
+        endDate = datetime.datetime.strptime(body.get('EndDate'),'%Y-%m-%d')
+
         # Allow access only if role is Admin or Teacher
         if role != "Admin" and role != "Teacher" :
-            return JsonResponse({"Success": False, "Message": "Authorization failed"}, status=401)
+            return JsonResponse({"Success": False, "Role": role, "Message": "Authorisation failed"}, status=401)
         
-        # Return error message if the username does not exist (in request details)
-        #if "Username" not in body:
-        #    return JsonResponse({"Success": False, "Message": "Username not provided"}, status=400)
-        
-        # Search for the username in the collection
-        #userToDelete = {"Username": body["Username"]}
-
         # Search for User by ID
         # Return error message if the user ID does not exist (in request details)
-        if "_id" not in body:
-            return JsonResponse({"Success": False, "Message": "User ID not provided"}, status=400)
+        if id:
+            # Search for the username in the collection
+            idToDelete = {"_id": objId}
         
-        # Search for the username in the collection
-        idToDelete = {"_id": objId}
+            # If ID is found, delete the user and return confirmation
+            if idToDelete:
+                result = Users.delete_one(idToDelete)
+                return JsonResponse({"Success": True, "Role": roleForDelete, 
+                                     "Message": f"User with Id: {idToDelete} deleted sucessfully"}, status=200)
 
-        # If ID is found, delete the user and return confirmation
-        # if userToDelete:
-        #    result = Users.delete_one(userToDelete)
-        #    data = {"deleted_count": result.deleted_count}
-        #    return JsonResponse(data, status=200)
-        
-        # If ID is found, delete the user and return confirmation
-        if idToDelete:
-            result = Users.delete_one(idToDelete)
-            data = {"deleted_count": result.deleted_count}
-            return JsonResponse(data, status=200)
-        
-        # Username is not found, return error message
-        return JsonResponse({"Success": False, "Message": "Couldn't Find Username"}, status=403)
+        # Search for multiple users by Role and a date range for LastLogin     
+        if roleForDelete and startDate and endDate:
+            print("Searching for users")
+            print(f"Role: {roleForDelete}, StartDate: {startDate}, EndDate: {endDate}")
+            # Data filter for role and date range
+            query = {
+                "Role": roleForDelete,
+                "LastLogin": {"$gte": startDate, "$lte": endDate}
+            }
+            print(query)
+
+            # Query the Users collection
+            foundUsers = Users.find(query)
+            print(foundUsers)
+
+            # List to store IDs of users to delete
+            idsToDelete = [user["_id"] for user in foundUsers]
+
+            print(idsToDelete)
+
+            if idsToDelete:
+                result = Users.delete_many({"_id": {"$in": idsToDelete}})
+                return JsonResponse({"Success": True, "Role": role, 
+                                        "Message": f"User with Id: {result.deleted_count} deleted sucessfully"}, status=200)
+            
+        # User/s could not be found, return error message
+        return JsonResponse({"Success": False, "Message": "Failed to delete user/s"}, status=403)
           
     # /users > PUT
     if (request.method == "PUT"):
@@ -105,17 +121,17 @@ def UsersView(request):
         role = Authorization(body)
 
         if role != "Admin" and role != "Teacher" :
-            return JsonResponse({"Success": False, "Message": "Authorization failed"}, status=401)
+            return JsonResponse({"Success": False, "Role" : role, "Message": "Authorisation failed"}, status=401)
         
         if "Username" not in body:
-            return JsonResponse({"Success": False, "Message": "Username not provided"}, status=400)
+            return JsonResponse({"Success": False, "Role" : role, "Message": "Username not provided"}, status=400)
         
         user_query = {
             "Username": body["Username"]
         }
         existing_user = Users.find_one(user_query)
         if existing_user is None:
-            return JsonResponse({"Success": False, "Message": "User not found"}, status=404)
+            return JsonResponse({"Success": False, "Role" : role, "Message": "User not found"}, status=404)
         update_data = {}
         if "Password" in body:
             update_data["Password"] = Hash_Password(body["Password"])
@@ -128,10 +144,11 @@ def UsersView(request):
         update_data["LastLogin"] = datetime.datetime.now(datetime.timezone.utc)
         result = Users.update_one(user_query, {"$set": update_data})
         if result.modified_count > 0:
-            return JsonResponse({"Success": True, "Message": "User details updated successfully"}, status=200)
+            return JsonResponse({"Success": True, "Role" : role,
+                                   "Message": "User details updated successfully"}, status=200)
         else:
             return JsonResponse({"Success": False, "Message": "Failed to update user details"}, status=400)
-          
+      
     # /users > PATCH
     if (request.method == "PATCH"):
         body = json.loads(request.body.decode("utf-8"))
@@ -170,7 +187,6 @@ def UsersView(request):
 
             # Convert the timestamp to a datetime object
             date_created = datetime.datetime.fromtimestamp(timestamp)
-            #dateConverted = datetime.datetime.strptime(date_created,'%Y-%m-%d %H:%M:%S')
 
             # Add the extracted data to the temporary collection
             temp_collection[object_id] = {"role": role, "date_created": date_created}
@@ -192,8 +208,7 @@ def UsersView(request):
         if changeCount > 0:
             return JsonResponse({"Success": True, "Message": f"{changeCount} user roles updated successfully"}, status=200)
         else:
-            return JsonResponse({"Success": False, "Message": "Failed to update user roles"}, status=400)
-        
+            return JsonResponse({"Success": False, "Message": "Failed to update user roles"}, status=400) 
     # End /users > PATCH
       
         
@@ -480,11 +495,10 @@ def AnalysisMaxView(request):
     
 # ENDPOINT >> /users/role -- use for testing > Returns the role of the user logging in
 def UsersRoleView(request):
-    # /users > PATCH
+    # /users/role > PATCH
     if (request.method == "PATCH"):
         body = json.loads(request.body.decode("utf-8"))
         role = Authorization(body)
-        print(role)
 
         if role:
             return JsonResponse({"Success": True, "Message": "Authorisation successful", "Role": role}, status=200)
