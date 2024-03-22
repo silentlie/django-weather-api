@@ -189,6 +189,11 @@ def UsersView(request):
     return JsonResponse({"Error": "Method not allowed"}, status=405)
 
 
+
+########### ADD IN AN API REQUEST USING OPTIONS ################################3
+
+
+
 ## ENDPOINT >> /readings -- for managing weather readings #####
 def ReadingsView (request):
     # /readings GET
@@ -231,7 +236,7 @@ def ReadingsView (request):
         
         return JsonResponse(returnData, safe=False)
 
-    # /readings POST NOTE *********Currently a work in progress
+    # /readings POST
     if(request.method == "POST"):
         body = json.loads(request.body.decode("utf-8"))
         role = Authorization(body)
@@ -308,8 +313,38 @@ def ReadingsView (request):
 
         return JsonResponse({"status": "success", "message": returnMessage}, status=200)
 
+    # /readings PATCH
+    if(request.method == "PATCH"):
+        body = json.loads(request.body.decode("utf-8"))
+        role = Authorization(body)
+        
+        id = body.get("ReadingID")
+        new_precipitation = body.get("Precipitation")
+
+        # Allow access only if role is Admin or Teacher
+        if role != "Admin" and role != "Teacher" :
+            return JsonResponse({"Success": False, "Role": role, "Message": "Authorisation failed"}, status=401)
+        
+        try:
+            objId = ObjectId(id)
+            # Find the existing reading
+            existing_reading = Readings.find_one({"_id": objId})
+
+            if existing_reading:
+                existing_reading["Precipitation mm/h"] = new_precipitation
+                Readings.update_one({"_id": objId}, {"$set": existing_reading})
+                return JsonResponse({"Success": True, "Message": "Reading updated successfully"})
+        
+            return JsonResponse({"Success": False, "Message": "Reading not found"}, status=404)
+
+        except Exception as e:
+            return JsonResponse({"Success": False, "Message": str(e)}, status=400)
+        # END /readings PATCH
+
     # Returns error: method not allowed for any other methods
     return JsonResponse({"Error": "Method not allowed"}, status=405)
+## End ENDPOINT >> /readings
+
 
 ## ENDPOINT >> /sensors -- for managing sensors ##
 # /sensors > POST
