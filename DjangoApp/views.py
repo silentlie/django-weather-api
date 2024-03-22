@@ -100,17 +100,14 @@ def UsersView(request):
 
             # Query the Users collection
             foundUsers = Users.find(query)
-            print(foundUsers)
 
-            # List to store IDs of users to delete
-            idsToDelete = [user["_id"] for user in foundUsers]
+            foundUsersList = list(foundUsers)
 
-            print(idsToDelete)
-
-            if idsToDelete:
-                result = Users.delete_many({"_id": {"$in": idsToDelete}})
+            if foundUsersList:
+                print(foundUsersList)
+                result = Users.delete_many(query)
                 return JsonResponse({"Success": True, "Role": role, 
-                                        "Message": f"User with Id: {result.deleted_count} deleted sucessfully"}, status=200)
+                                        "Message": f"{result.deleted_count} user/s deleted sucessfully"}, status=200)
             
         # User/s could not be found, return error message
         return JsonResponse({"Success": False, "Message": "Failed to delete user/s"}, status=403)
@@ -434,6 +431,8 @@ def AnalysisMaxView(request):
             dateFilter = {
                 "Time": {"$gte": startDate, "$lte": endDate}
             }
+
+        print(dateFilter)
 
         # Query the Readings collection
         maximumReading = Readings.find(dateFilter).sort('Precipitation mm/h', -1).limit(1)
