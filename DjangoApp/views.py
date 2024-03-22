@@ -131,7 +131,72 @@ def UsersView(request):
             return JsonResponse({"Success": True, "Message": "User details updated successfully"}, status=200)
         else:
             return JsonResponse({"Success": False, "Message": "Failed to update user details"}, status=400)
+          
+    # /users > PATCH
+    if (request.method == "PATCH"):
+        body = json.loads(request.body.decode("utf-8"))
+        role = Authorization(body)
 
+        startDate = body.get('StartDate')
+        endDate = body.get('EndDate')
+        currentRole = body.get("CurrentRole")
+        changedRole = body.get("ChangedRole")
+
+        # Read in Start date and End date
+        if startDate and endDate:
+            dateRange = True
+            # convert date time strings (in format YYYY-MM-DD HH:MM:SS) to datetime object
+            startDate = datetime.datetime.strptime(startDate,'%Y-%m-%d')
+            endDate = datetime.datetime.strptime(endDate,'%Y-%m-%d')
+        
+        if role != "Admin":
+            return JsonResponse({"Success": False, "Message": "Authorization failed"}, status=401)
+
+        # Create a temporary collection to hold the extracted data
+        temp_collection = {}
+
+        # Create a list from Users collection
+        # Query the collection and convert the cursor to a list
+        cursor = Users.find()
+        usersList = list(cursor)      
+
+        # Iterate over the users and extract the data
+        for user in usersList:
+            object_id = user["_id"]
+            role = user["Role"]
+            
+            # Extract the timestamp from the ObjectId
+            timestamp = object_id.generation_time.timestamp()
+
+            # Convert the timestamp to a datetime object
+            date_created = datetime.datetime.fromtimestamp(timestamp)
+            #dateConverted = datetime.datetime.strptime(date_created,'%Y-%m-%d %H:%M:%S')
+
+            # Add the extracted data to the temporary collection
+            temp_collection[object_id] = {"role": role, "date_created": date_created}
+
+        # Counter for users that match search
+        changeCount = 0
+
+        # Search for users based on the extracted date
+        for object_id, data in temp_collection.items():
+            if startDate <= data["date_created"] <= endDate and data["role"] == currentRole:
+                print(f"User ID: {object_id}, Role: {data['role']}, Date Created: {data['date_created']}")
+
+                update_query = {"$set": {"Role": changedRole}}
+                result = Users.update_one({"_id": object_id}, update_query)
+        
+                if result.modified_count > 0:
+                    changeCount += 1
+
+        if changeCount > 0:
+            return JsonResponse({"Success": True, "Message": f"{changeCount} user roles updated successfully"}, status=200)
+        else:
+            return JsonResponse({"Success": False, "Message": "Failed to update user roles"}, status=400)
+        
+    # End /users > PATCH
+      
+        
     # Returns error: method not allowed for any other methods
     return JsonResponse({"Error": "Method not allowed"}, status=405)
 
@@ -176,7 +241,7 @@ def ReadingsView (request):
             list_cur = list(result)
             returnData = dumps(list_cur)
         
-    return JsonResponse(returnData, safe=False)
+        return JsonResponse(returnData, safe=False)
 
     # /readings POST NOTE *********Currently a work in progress
     if(request.method == "POST"):
@@ -370,18 +435,12 @@ def AnalysisMaxView(request):
         if deviceName:
             dateFilter = {
                 "Device Name": deviceName,
-                "Time": {
-                    "$gte": startDate,
-                    "$lte": endDate
-                }
+                "Time": {"$gte": startDate, "$lte": endDate}
             }
         # Data filter excluding Sensor Name
         else:
             dateFilter = {
-                "Time": {
-                    "$gte": startDate,
-                    "$lte": endDate
-                }
+                "Time": {"$gte": startDate, "$lte": endDate}
             }
 
         # Query the Readings collection
