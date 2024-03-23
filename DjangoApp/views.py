@@ -7,6 +7,8 @@ import pymongo
 import datetime
 from dateutil.relativedelta import relativedelta   # pip install python-dateutil to import
 import hashlib
+from flask import Flask
+from flasgger import Swagger
 # Create your views here.
 
 # Connection to the database & collections
@@ -21,115 +23,146 @@ def index(request):
     return HttpResponse("<h1>Welcome to <u>Weather App API<u>!</h1>")
 
 ## ENDPOINT >> UsersView -- for managing users #####
-    # /users > POST
 def UsersView(request):
-    if (request.method == "POST"):
-        body = json.loads(request.body.decode("utf-8"))
-        role = Authorization(body)
+    ## Load body
+    body = json.loads(request.body.decode("utf-8"))
+    role = Authorisation(body)
 
-        # Allow access only if role is Admin or Teacher
-        if role != "Admin" and role != "Teacher" :
-            return JsonResponse({"Success": False, "Message": "Authorization failed"}, status=401)
-        
+    # /users > Authorisation ##
+    # Allow access to user endpoint requests only if role is Admin or Teacher
+    if role != "Admin" and role != "Teacher" :
+        return JsonResponse({"Success": False, "Authorisation role": role, "Message": "Authorisation failed"}, status=401)
+    
+    # /users > POST
+    if (request.method == "POST"):        
+        ## Get data from request ##
+        username = body.get("Username")
+        password = Hash_Password(body.get("Password"))
+        userRole = body.get("Role")
+        fName = body.get("FName", None)
+        lName = body.get("LName", None)
+        token = body.get("Token", None)
+
+        ## Process ##
         # Return error message if user already exists
-        if (Users.find_one({"Username": body["Username"]}) is not None):
-            return JsonResponse({"Success": False, "Message": "User already exists"}, status=404)
+        if (Users.find_one({"Username": username}) is not None):
+            return JsonResponse({"Success": False, "Authorisation": "Successful", "Authorisation role": role,
+                                 "Message": "User already exists"}, status=409)
         
+        # Check that password and userRole have been included in the body, then add user
+        if password and userRole:
+        # Collate new user details from input data and calculate lastlogin datetime
         # Collate new user details from input data and calculate lastlogin datetime
         ## NOTE: Should check for missing information here and provide a useful error message if missing
                 # i.e. Mandatory fields = Username, Password, Role (FName, LName optional?)
-        newUser = {
-            "Username": body["Username"],
-            "Password": Hash_Password(body["Password"]),
-            "FName": body["FName"],
-            "LName": body["LName"],
-            "Role": body["Role"],
-            "LastLogin": datetime.datetime.now(tz=datetime.timezone.utc),
-            "Token": None,
-        }
+            # Collate new user details from input data and calculate lastlogin datetime
+        ## NOTE: Should check for missing information here and provide a useful error message if missing
+                # i.e. Mandatory fields = Username, Password, Role (FName, LName optional?)
+            newUser = {
+                "Username": username,
+                "Password": password,
+                "FName": fName,
+                "LName": lName,
+                "Role": userRole,
+                "LastLogin": datetime.datetime.now(tz=datetime.timezone.utc),
+                "Token": token,
+            }
 
-        # Insert the new user
-        result = Users.insert_one(newUser)
+            # Insert the new user
+            result = Users.insert_one(newUser)
 
-        # Return the ID of the new user
-        data = {
-            "Inserted_id": str(result.inserted_id)
-        }
-        return JsonResponse(data, status=200)
+            # Get the ID of the new user and return success message
+            newID = {"Inserted_id": str(result.inserted_id)}
+            return JsonResponse({"Success": True, "Authorisation role": role, "Message": f"New user, {newID}, sucessfully created."}, status=200)
+        
+        # Response for malformed request
+        return JsonResponse({"Success": False, "Authorisation": "Successful", "Authorisation role": role, 
+                                        "Message": "Request does not contain required information"}, status=400)
+    ## End /users > POST
     
     # /users > DELETE
-    if (request.method == "DELETE"):
-        body = json.loads(request.body.decode("utf-8"))
-        role = Authorization(body)
+    if (request.method == "DELETE"):        
+        ## Get data from request ##
+        # For deleting a single user:
+        # Get ID from URL paramaters OR username from body
+        id = body.get("ID")
+        username = body.get("Username")
 
-        id = body.get("_id")
-        objId = ObjectId(id)
-
+        # For deleting multiple users of a particular role, with LastLogin within a specified date range
         roleForDelete = body.get("Role")
+        startDate = body.get('StartDate')
+        endDate = body.get('EndDate')
 
-        # convert date time strings (in format YYYY-MM-DD HH:MM:SS) to datetime object
-        startDate = datetime.datetime.strptime(body.get('StartDate'),'%Y-%m-%d')
-        endDate = datetime.datetime.strptime(body.get('EndDate'),'%Y-%m-%d')
-
-        # Allow access only if role is Admin or Teacher
-        if role != "Admin" and role != "Teacher" :
-            return JsonResponse({"Success": False, "Role": role, "Message": "Authorisation failed"}, status=401)
-        
-        # Search for User by ID
-        # Return error message if the user ID does not exist (in request details)
-        if id:
-            # Search for the username in the collection
-            idToDelete = {"_id": objId}
-        
-            # If ID is found, delete the user and return confirmation
-            if idToDelete:
-                result = Users.delete_one(idToDelete)
-                return JsonResponse({"Success": True, "Role": roleForDelete, 
-                                     "Message": f"User with Id: {idToDelete} deleted sucessfully"}, status=200)
-
+        ## Process ##
+        # Delete many
         # Search for multiple users by Role and a date range for LastLogin     
         if roleForDelete and startDate and endDate:
-            print("Searching for users")
-            print(f"Role: {roleForDelete}, StartDate: {startDate}, EndDate: {endDate}")
-            # Data filter for role and date range
+            # convert date time strings (in format YYYY-MM-DD HH:MM:SS) to datetime object
+            startDate = datetime.datetime.strptime(body.get('StartDate'),'%Y-%m-%d')
+            endDate = datetime.datetime.strptime(body.get('EndDate'),'%Y-%m-%d')
+
+            # Query for role and date range
             query = {
                 "Role": roleForDelete,
                 "LastLogin": {"$gte": startDate, "$lte": endDate}
             }
-            print(query)
 
-            # Query the Users collection
-            foundUsers = Users.find(query)
+            result = Users.delete_many(query)
 
-            foundUsersList = list(foundUsers)
+            if result.deleted_count > 0:
+                return JsonResponse({"Success": True, "Authorisation role": role, 
+                                        "Message": f"{result.deleted_count} users deleted sucessfully"}, status=200)
+            else:
+                return JsonResponse({"Success": False, "Authorisation role": role, 
+                                        "Message": "No users found for the given criteria"}, status=404)
+        
+        # Delete one
+        # Delete single user (by ID or Username - depending on which is provided)
+        if id or username:
 
-            if foundUsersList:
-                print(foundUsersList)
-                result = Users.delete_many(query)
-                return JsonResponse({"Success": True, "Role": role, 
-                                        "Message": f"{result.deleted_count} user/s deleted sucessfully"}, status=200)
+            print(f"ID {id} and username {username}")
+            query = ""
             
-        # User/s could not be found, return error message
-        return JsonResponse({"Success": False, "Message": "Failed to delete user/s"}, status=403)
-          
+            if id:
+                # Search for the user by ID
+                query = {"_id": ObjectId(id)}
+
+            elif username:
+                # Search for the user by Username
+                query = {"Username": username}
+            
+
+            result = Users.delete_one(query)
+
+            if result.deleted_count > 0:
+                return JsonResponse({"Success": True, "Authorisation role": role, 
+                                        "Message": f"User deleted sucessfully"}, status=200)
+            else:
+                return JsonResponse({"Success": False, "Authorisation role": role, 
+                                        "Message": "User not found"}, status=404)
+
+        # Response for malformed request
+        return JsonResponse({"Success": False, "Authorisation role": role, 
+                                "Message": "Request does not contain required information"}, status=400)
+    ## End /users > DELETE
+
     # /users > PUT
     if (request.method == "PUT"):
-        body = json.loads(request.body.decode("utf-8"))
-        role = Authorization(body)
-
-        if role != "Admin" and role != "Teacher" :
-            return JsonResponse({"Success": False, "Role" : role, "Message": "Authorisation failed"}, status=401)
-        
+        # Check that username (for the user to be updated) has been included in the request      
         if "Username" not in body:
-            return JsonResponse({"Success": False, "Role" : role, "Message": "Username not provided"}, status=400)
+            return JsonResponse({"Success": False, "Authorisation role": role, "Message": "Username not provided"}, status=400)
         
-        user_query = {
-            "Username": body["Username"]
-        }
-        existing_user = Users.find_one(user_query)
+        # Search for the user in the collection
+        query = {"Username": body["Username"]}
+        existing_user = Users.find_one(query)
+
+        # If the use is not found return an error
         if existing_user is None:
-            return JsonResponse({"Success": False, "Role" : role, "Message": "User not found"}, status=404)
+            return JsonResponse({"Success": False, "Authorisation role": role, "Message": "User not found"}, status=404)
+        
+        #Update the user data
         update_data = {}
+
         if "Password" in body:
             update_data["Password"] = Hash_Password(body["Password"])
         if "FName" in body:
@@ -138,27 +171,33 @@ def UsersView(request):
             update_data["LName"] = body["LName"]
         if "Role" in body:
             update_data["Role"] = body["Role"]
+
         update_data["LastLogin"] = datetime.datetime.now(datetime.timezone.utc)
-        result = Users.update_one(user_query, {"$set": update_data})
+
+        result = Users.update_one(query, {"$set": update_data})
         if result.modified_count > 0:
-            return JsonResponse({"Success": True, "Role" : role,
+            return JsonResponse({"Success": True, "Authorisation role": role,
                                    "Message": "User details updated successfully"}, status=200)
         else:
             return JsonResponse({"Success": False, "Message": "Failed to update user details"}, status=400)
+    ## End /users > PUT
       
     # /users > PATCH
     if (request.method == "PATCH"):
-        body = json.loads(request.body.decode("utf-8"))
-        role = Authorization(body)
+
+        # Override general authorisation to limit access for this method to Admin only
         if role != "Admin":
-            return JsonResponse({"Success": False, "Message": "Authorization failed"}, status=401)
+            return JsonResponse({"Success": False, "Authorisation role": role, "Message": "Authorisation failed"}, status=401)
+        
+        # Read in data from request
         startDate = body.get('StartDate')
         endDate = body.get('EndDate')
         currentRole = body.get("CurrentRole")
         changedRole = body.get("ChangedRole")
+
         start_id = None
         end_id = None
-        # Read in Start date and End date
+        
         if startDate and endDate:
             # convert date time strings (in format YYYY-MM-DD HH:MM:SS) to datetime object
             startDate = datetime.datetime.strptime(startDate,'%Y-%m-%d')
@@ -171,22 +210,23 @@ def UsersView(request):
             print(end_id)
         
         query = { "_id": {"$gte": start_id, "$lte": end_id}, "Role": currentRole}
-        cursor = Users.find(query)
-        queryList = list(cursor)
-        print(queryList)
-        if queryList is None:
-            return JsonResponse({"Success": False, "Message": "Failed to update user roles"}, status=400)
+        
         result = Users.update_many(query,{"$set": {"Role": changedRole}})
         changeCount = result.modified_count
-        return JsonResponse({"Success": True, "Message": f"{changeCount} user roles updated successfully"}, status=200)
-        return JsonResponse({"Success": False, "Message": "Failed to update user roles"}, status=400)
-            
-        
+
+        if result.modified_count > 0:
+            return JsonResponse({"Success": True, "Authorisation role": role, "Message": f"{changeCount} user roles updated successfully"}, status=200)
+        else:
+            return JsonResponse({"Success": False, "Authorisation role": role, "Message": "No users found for the given criteria"}, status=400)
     # End /users > PATCH
       
+      
+        
+     
         
     # Returns error: method not allowed for any other methods
     return JsonResponse({"Error": "Method not allowed"}, status=405)
+# End ENDPOINT /users
 
 
 
@@ -239,7 +279,7 @@ def ReadingsView (request):
     # /readings POST
     if(request.method == "POST"):
         body = json.loads(request.body.decode("utf-8"))
-        role = Authorization(body)
+        role = Authorisation(body)
         deviceName = body.get('Device Name')
         readings = body.get('Readings', [])
 
@@ -254,16 +294,17 @@ def ReadingsView (request):
         numRecords = 0
 
         if role != "Admin" and role != "Teacher" and role != "Sensor":
-            return JsonResponse({"Success": False, "Message": "Authorization failed"}, status=401)
+            return JsonResponse({"Success": False, "Authorisation role": role, "Message": "Authorisation failed"}, status=401)
 
         # Return error message if Device does not exist
         if (Sensors.find_one({"DeviceName": deviceName}) is None):
-            return JsonResponse({"Success": False, "Message": "Device does not exist"}, status=404)
+            return JsonResponse({"Success": False, "Authorisation role": role, "Message": "Sensor(device) does not exist"}, status=404)
        
         # Use device name to get latitude and longitude
         latitude_longitude = GetLatitudeLongitude(deviceName)
         if latitude_longitude is None:
-            return JsonResponse({"Success": False, "Message": "latitude_longitude is None"}, status=404)
+            return JsonResponse({"Success": False, "Authorisation role": role, "Message": "Sensor location could not be found"}, status=404)
+        
         # List to store all new readings
         newReadingsList = []
 
@@ -288,9 +329,6 @@ def ReadingsView (request):
                         "Wind Direction (°)": data.get("Wind Direction (°)")
                     }
                 newReadingsList.append(newReading)
-                #numRecords += 1  
-            #print("Error count" + errCount)
-            #print("New readings" + str(numRecords))
 
         numRecords = len(newReadingsList)
         print(numRecords)
@@ -302,28 +340,29 @@ def ReadingsView (request):
             result = Readings.insert_many(newReadingsList) 
                 
         else:
-            return JsonResponse({"status":"error", "message":"Invalid request"}, status=400)
+            return JsonResponse({"Success": False, "Authorisation role": role, "Message": "Invalid request"}, status=400)
 
         print(result)
 
         if errCount > 1:
-            errMessage = str(errCount) + " duplicate reading not added."
+            errMessage = f" {errCount} duplicate readings not added."
 
-        returnMessage = str(numRecords) + " readings added successfully." + errMessage 
+        returnMessage = f"{numRecords} readings added successfully.{errMessage}" 
 
-        return JsonResponse({"status": "success", "message": returnMessage}, status=200)
+        return JsonResponse({"Success": True, "Authorisation role": role, "Message": returnMessage}, status=200)
+    ## End /readings POST
 
     # /readings PATCH
     if(request.method == "PATCH"):
         body = json.loads(request.body.decode("utf-8"))
-        role = Authorization(body)
+        role = Authorisation(body)
         
         id = body.get("ReadingID")
         new_precipitation = body.get("Precipitation")
 
         # Allow access only if role is Admin or Teacher
         if role != "Admin" and role != "Teacher" :
-            return JsonResponse({"Success": False, "Role": role, "Message": "Authorisation failed"}, status=401)
+            return JsonResponse({"Success": False, "Authorisation role": role, "Message": "Authorisation failed"}, status=401)
         
         try:
             objId = ObjectId(id)
@@ -333,12 +372,12 @@ def ReadingsView (request):
             if existing_reading:
                 existing_reading["Precipitation mm/h"] = new_precipitation
                 Readings.update_one({"_id": objId}, {"$set": existing_reading})
-                return JsonResponse({"Success": True, "Message": "Reading updated successfully"})
+                return JsonResponse({"Success": True, "Authorisation role": role, "Message": "Reading updated successfully"})
         
-            return JsonResponse({"Success": False, "Message": "Reading not found"}, status=404)
+            return JsonResponse({"Success": False, "Authorisation role": role, "Message": "Reading not found"}, status=404)
 
         except Exception as e:
-            return JsonResponse({"Success": False, "Message": str(e)}, status=400)
+            return JsonResponse({"Success": False, "Authorisation role": role, "Message": str(e)}, status=400)
         # END /readings PATCH
 
     # Returns error: method not allowed for any other methods
@@ -347,26 +386,20 @@ def ReadingsView (request):
 
 
 ## ENDPOINT >> /sensors -- for managing sensors ##
-# /sensors > POST
+# /sensors POST
 def SensorsView(request):
-    # /sensors > GET NOTE for use in dev testing only > Find unique entries for 'Device Name' (under readings)
-    if (request.method == "GET"):
-        unique_device_names = Readings.distinct('Device Name')
-
-        return JsonResponse(unique_device_names, safe=False)
-
     # /sensors > POST
     if (request.method == "POST"):
         body = json.loads(request.body.decode("utf-8"))
-        role = Authorization(body)
+        role = Authorisation(body)
 
         # Allow access only if role is Admin
         if role != "Admin" :
-            return JsonResponse({"Success": False, "Message": "Authorization failed"}, status=401)
+            return JsonResponse({"Success": False, "Authorisation role": role, "Message": "Authorisation failed"}, status=401)
         
         # Return error message if sensor already exists
         if (Users.find_one({"DeviceName": body["DeviceName"]}) is not None):
-            return JsonResponse({"Success": False, "Message": "Sensor already exists"}, status=404)
+            return JsonResponse({"Success": False, "Authorisation role": role, "Message": "Sensor already exists"}, status=404)
         
         # Collate new sensor details from input data
         ## NOTE: Should check for missing information here and provide a useful error message if missing
@@ -379,54 +412,45 @@ def SensorsView(request):
         # Insert the new sensor
         result = Sensors.insert_one(newSensor)
 
-        # Return the ID of the new sensor
-        data = {
-            "Inserted_id": str(result.inserted_id)
-        }
-        return JsonResponse(data, status=200)
+        return JsonResponse({"Success": True, "Authorisation role": role, "Message": f"Sensor {result.inserted_id} successfully added"}, status=404)
+    ## End /sensors POST
     
     # /sensors > DELETE
     if (request.method == "DELETE"):
         body = json.loads(request.body.decode("utf-8"))
-        role = Authorization(body)
+        role = Authorisation(body)
 
         # Allow access only if role is Admin
         if role != "Admin":
-            return JsonResponse({"Success": False, "Message": "Authorization failed"}, status=401)
+            return JsonResponse({"Success": False, "Authorisation role": role, "Message": "Authorisation failed"}, status=401)
         
         # Return error message if the username does not exist (in request details)
         if "DeviceName" not in body:
-            return JsonResponse({"Success": False, "Message": "DeviceName not provided"}, status=400)
+            return JsonResponse({"Success": False, "Authorisation role": role, "Message": "DeviceName not provided"}, status=400)
         
         # Search for the username in the collection
         sensorToDelete = {"DeviceName": body["DeviceName"]}
 
-        # If username is found, delete the user and return confirmation
-        if sensorToDelete:
-            result = Sensors.delete_one(sensorToDelete)
-            data = {"deleted_count": result.deleted_count}
-            return JsonResponse(data, status=200)
-        
-        # Username is not found, return error message
-        return JsonResponse({"Success": False, "Message": "Couldn't Find DeviceName"}, status=403)
+        result = Sensors.delete_one(sensorToDelete)
+
+        if result.deleted_count > 0:    
+            return JsonResponse({"Success": True, "Authorisation role": role, "Message": f"Sensor {result.deleted_count} successfully deleted"}, status=200)
+        else:
+            # Username is not found, return error message
+            return JsonResponse({"Success": False, "Authorisation role": role, "Message": "Couldn't Find Sensor (Device Name)"}, status=403)
+    ## End /sensors DELETE
 
     # Returns error: method not allowed for any other methods
     return JsonResponse({"Error": "Method not allowed"}, status=405)
 
 
 ## ENDPOINT >> analysis -- NOT IN USE  #####
-# /analysis > POST
-def AnalysisView(request):
-
-    return ""
+# Uses AnalysisView
 
 
 ## ENDPOINT >> /analysis/max -- for calculating max value of Temperature or Precipitation of readings #####
 def AnalysisMaxView(request):
-    # examples of request parameters
-    # /analysis/max?Find=Temperature&StartDate=2020-01-01&EndDate=2021-04-01
-    # /analysis/max?Find=Precipitation&DeviceName=Woodford_Sensor&StartDate=2020-01-01&EndDate=2020-04-01
-    # /analysis/max?Find=Precipitation&DeviceName=Woodford_Sensor&StartDate=2020-01-01&EndDate=2021-04-01
+
     # /analysis/max GET
     if(request.method == "GET"):
 
@@ -493,31 +517,17 @@ def AnalysisMaxView(request):
                     }
 
         if returnData is not None:
-            return JsonResponse(returnData)
+            return JsonResponse(returnData, status=200)
         
         # No Content
         if dateRange == True:
             return  JsonResponse({"Success": False, "Message": "No records found within the specified date range"}, status=204)
         elif dateRange == False:               
             return JsonResponse({"Success": False, "Message": "No records found within last 5 months"}, status=204)
+    ## End /analysis/max GET
 
     # Returns error: method not allowed for any other methods
     return JsonResponse({"Error": "Method not allowed"}, status=405)        
-    
-# ENDPOINT >> /users/role -- use for testing > Returns the role of the user logging in
-def UsersRoleView(request):
-    # /users/role > PATCH
-    if (request.method == "PATCH"):
-        body = json.loads(request.body.decode("utf-8"))
-        role = Authorization(body)
-
-        if role:
-            return JsonResponse({"Success": True, "Message": "Authorisation successful", "Role": role}, status=200)
-
-        return JsonResponse({"Success": False, "Message": "Authorisation failed"}, status=400)     
-
-    # Returns error: method not allowed for any other methods        
-    return JsonResponse({"Error": "Method not allowed"}, status=405)
 
 
 ## ENDPOINT >> /login -- for managing user login #####
@@ -526,18 +536,20 @@ def LoginView(request):
     # /login PATCH
     if (request.method == "PATCH"):
         body = json.loads(request.body.decode("utf-8"))
-        result = Authorization(body)
+        result = Authorisation(body)
         print(result)
+
         if result:
-            return JsonResponse({"Success": True, "Message": "Authorization successful"}, status=200)
-        return JsonResponse({"Success": False, "Message": "Authorization failed"}, status=400)
+            return JsonResponse({"Success": True, "Message": "Authorisation successful"}, status=200)
+        return JsonResponse({"Success": False, "Message": "Authorisation failed"}, status=400)
+    ## End /login PATCH
 
     # Returns error: method not allowed for any other methods        
     return JsonResponse({"Error": "Method not allowed"}, status=405)
 
 ## FUNCTIONS #########################################################################################
-# Check point function of every request for authorization
-def Authorization(body):
+# Check point function of every request for Authorisation
+def Authorisation(body):
     username = body["Authentication"]["Username"]
     password = body["Authentication"]["Password"]
     hashed_password = Hash_Password(password)
@@ -561,6 +573,7 @@ def Authorization(body):
         role = result.get("Role", None)
         return role
     return None
+## End Authorisation function
 
 # Hash password function
 def Hash_Password(password):
@@ -569,6 +582,7 @@ def Hash_Password(password):
     sha256_hash.update(password_bytes)
     hashed_password = sha256_hash.hexdigest()
     return hashed_password
+## End Hash password function
 
 # Get latitude and longitude for a Sensor
 def GetLatitudeLongitude(deviceName):
@@ -582,3 +596,4 @@ def GetLatitudeLongitude(deviceName):
         }
         return latitude_longitude
     return None
+## End Get latitude and longitude for a Sensor function
