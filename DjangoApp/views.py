@@ -7,8 +7,6 @@ import pymongo
 import datetime
 from dateutil.relativedelta import relativedelta   # pip install python-dateutil to import
 import hashlib
-from flask import Flask
-from flasgger import Swagger
 # Create your views here.
 
 # Connection to the database & collections
@@ -22,14 +20,27 @@ Users = db["Users"]
 def index(request):
     return HttpResponse("<h1>Welcome to <u>Weather App API<u>!</h1>")
 
+# def lambda_handler(event, context):
+#     return {
+#         'statusCode': 200,
+#         'headers': {
+#             'Access-Control-Allow-Headers': 'Content-Type',
+#             'Access-Control-Allow-Origin': http//:127.0.0.1:8000
+#             'Access-Control-Allow-Methods': 'OPTIONS, GET, POST, PUT, PATCH, DELETE'
+#         },
+#         'body': json.dumps('Hello from Lambda!')
+#     }
+
 ## ENDPOINT >> UsersView -- for managing users #####
 def UsersView(request):
     ## Load body
     body = json.loads(request.body.decode("utf-8"))
     role = Authorisation(body)
 
-    # /users > Authorisation ##
+    # /users > Authentication and authorisation ##
     # Allow access to user endpoint requests only if role is Admin or Teacher
+    if role is None:
+        return JsonResponse({"Success": False, "Message": "Authentication failed"}, status=401)
     if role != "Admin" and role != "Teacher" :
         return JsonResponse({"Success": False, "Authorisation role": role, "Message": "Authorisation failed"}, status=401)
     
@@ -219,11 +230,8 @@ def UsersView(request):
         else:
             return JsonResponse({"Success": False, "Authorisation role": role, "Message": "No users found for the given criteria"}, status=400)
     # End /users > PATCH
-      
-      
-        
-     
-        
+
+    
     # Returns error: method not allowed for any other methods
     return JsonResponse({"Error": "Method not allowed"}, status=405)
 # End ENDPOINT /users
@@ -292,7 +300,8 @@ def ReadingsView (request):
         errCount = 0
         # Count the number of weather readings to be added (this will not include duplicates)
         numRecords = 0
-
+        if role is None:
+            return JsonResponse({"Success": False, "Message": "Authentication failed"}, status=401)
         if role != "Admin" and role != "Teacher" and role != "Sensor":
             return JsonResponse({"Success": False, "Authorisation role": role, "Message": "Authorisation failed"}, status=401)
 
@@ -360,6 +369,8 @@ def ReadingsView (request):
         id = body.get("ReadingID")
         new_precipitation = body.get("Precipitation")
 
+        if role is None:
+            return JsonResponse({"Success": False, "Message": "Authentication failed"}, status=401)
         # Allow access only if role is Admin or Teacher
         if role != "Admin" and role != "Teacher" :
             return JsonResponse({"Success": False, "Authorisation role": role, "Message": "Authorisation failed"}, status=401)
@@ -393,6 +404,8 @@ def SensorsView(request):
         body = json.loads(request.body.decode("utf-8"))
         role = Authorisation(body)
 
+        if role is None:
+            return JsonResponse({"Success": False, "Message": "Authentication failed"}, status=401)
         # Allow access only if role is Admin
         if role != "Admin" :
             return JsonResponse({"Success": False, "Authorisation role": role, "Message": "Authorisation failed"}, status=401)
@@ -420,6 +433,8 @@ def SensorsView(request):
         body = json.loads(request.body.decode("utf-8"))
         role = Authorisation(body)
 
+        if role is None:
+            return JsonResponse({"Success": False, "Message": "Authentication failed"}, status=401)
         # Allow access only if role is Admin
         if role != "Admin":
             return JsonResponse({"Success": False, "Authorisation role": role, "Message": "Authorisation failed"}, status=401)
@@ -540,8 +555,8 @@ def LoginView(request):
         print(result)
 
         if result:
-            return JsonResponse({"Success": True, "Message": "Authorisation successful"}, status=200)
-        return JsonResponse({"Success": False, "Message": "Authorisation failed"}, status=400)
+            return JsonResponse({"Success": True, "Message": "Authentication successful"}, status=200)
+        return JsonResponse({"Success": False, "Message": "Authentication failed"}, status=400)
     ## End /login PATCH
 
     # Returns error: method not allowed for any other methods        
