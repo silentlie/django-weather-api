@@ -408,28 +408,40 @@ def SensorsView(request):
         body = json.loads(request.body.decode("utf-8"))
         role = Authorisation(body)
 
+        deviceName = body.get("DeviceName")
+        latitude = body.get("Latitude")
+        longitude = body.get("Longitude")
+
         if role is None:
             return JsonResponse({"Success": False, "Message": "Authentication failed"}, status=401)
         # Allow access only if role is Admin
         if role != "Admin" :
-            return JsonResponse({"Success": False, "Authorisation role": role, "Message": "Authorisation failed"}, status=401)
-        
+            return JsonResponse({"Success": False, "Authorisation role": role, "Message": "Authorisation failed"}, status=401)  
+
+        sensor = Sensors.find_one({"DeviceName": body["DeviceName"]})
+
         # Return error message if sensor already exists
-        if (Users.find_one({"DeviceName": body["DeviceName"]}) is not None):
-            return JsonResponse({"Success": False, "Authorisation role": role, "Message": "Sensor already exists"}, status=404)
+        if sensor is None:
+            # Collate new sensor details from input data
+            if deviceName is not None and latitude is not None and longitude is not None:
+                newSensor = {
+                    "DeviceName": deviceName,
+                    "Latitude": latitude,
+                    "Longitude": longitude,
+                }
+            else:
+                return JsonResponse({"Success": False, "Authorisation role": role,
+                    "Message": "Request must include 'DeviceName', 'Latitute', and 'Longitude'"}, status=400)
+
+            # Insert the new sensor
+            result = Sensors.insert_one(newSensor)
+
+            return JsonResponse({"Success": True, "Authorisation role": role,
+                "Message": f"Sensor {result.inserted_id} successfully added"}, status=200)
         
-        # Collate new sensor details from input data
-        ## NOTE: Should check for missing information here and provide a useful error message if missing
-        newSensor = {
-            "DeviceName": body["DeviceName"],
-            "Latitude": body["Latitude"],
-            "Longitude": body["Longitude"],
-        }
-
-        # Insert the new sensor
-        result = Sensors.insert_one(newSensor)
-
-        return JsonResponse({"Success": True, "Authorisation role": role, "Message": f"Sensor {result.inserted_id} successfully added"}, status=404)
+        return JsonResponse({"Success": False, "Authorisation role": role, "Message": "Sensor already exists"}, status=409)
+        
+        
     ## End /sensors POST
     
     # /sensors > DELETE
@@ -456,7 +468,7 @@ def SensorsView(request):
             return JsonResponse({"Success": True, "Authorisation role": role, "Message": f"Sensor {result.deleted_count} successfully deleted"}, status=200)
         else:
             # Username is not found, return error message
-            return JsonResponse({"Success": False, "Authorisation role": role, "Message": "Couldn't Find Sensor (Device Name)"}, status=403)
+            return JsonResponse({"Success": False, "Authorisation role": role, "Message": "Couldn't Find Sensor (DeviceName)"}, status=404)
     ## End /sensors DELETE
 
     # Returns error: method not allowed for any other methods
