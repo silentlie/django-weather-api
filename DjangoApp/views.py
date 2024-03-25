@@ -217,7 +217,7 @@ def UsersView(request):
         if result.modified_count > 0:
             return JsonResponse({"Success": True, "Authorisation role": role, "Message": f"{changeCount} user roles updated successfully"}, status=200)
         else:
-            return JsonResponse({"Success": False, "Authorisation role": role, "Message": "No users found for the given criteria"}, status=400)
+            return JsonResponse({"Success": False, "Authorisation role": role, "Message": "No users found for the given criteria"}, status=404)
     # End /users > PATCH
 
     
@@ -239,39 +239,54 @@ def ReadingsView (request):
         # Read in valid parameters from URL (DeviceName, DateTime, FirstTemp, SecondTemp)
         deviceName = request.GET.get('DeviceName')
         readingDateTime = request.GET.get('DateTime')
-        firstTemp = float(request.GET.get('FirstTemp'))
-        secondTemp = float(request.GET.get('SecondTemp'))
+        firstTemp = request.GET.get('FirstTemp')
+        secondTemp = request.GET.get('SecondTemp')
+
+        print(f"Device name {deviceName}, reading time {readingDateTime}, firstTemp {firstTemp}, secondTemp {secondTemp}")
+        if deviceName is  None and readingDateTime is  None and firstTemp is None and secondTemp is None:
+            return JsonResponse({"Success": False, "Message": "Malformed request"}, status=400)
 
         # Get request to obtain specific reading details based on inputs > DeviceName, DateTime
-        if deviceName and readingDateTime:
+        if deviceName is not None and readingDateTime is not None:
+            print(f"{deviceName} and {readingDateTime}")
             # convert date time string (in format YYYY-MM-DD HH:MM:SS) to datetime object
             convertedDateTime = datetime.datetime.strptime(readingDateTime,'%Y-%m-%d %H:%M:%S')
 
             reading = Readings.find_one({"Device Name": deviceName, "Time": convertedDateTime})
 
+            print(reading)
             # Return temperature, atmospheric pressure, radiation & precipitation (if found)
-            if reading:
+            if reading is not None:
                 returnData = {
                     "Temperature(°C)": reading.get("Temperature (°C)", None),
                     "Atmospheric Pressure (kPa)": reading.get("Atmospheric Pressure (kPa)", None),
                     "Solar Radiation (W/m2)": reading.get("Solar Radiation (W/m2)", None),
                     "Precipitation mm/h": reading.get("Precipitation mm/h", None)
                 }
+                return JsonResponse({"Success": True, "Data": f"{returnData}"}, status=200)
+            else:
+                return JsonResponse({"Success": False, "Message": "No data found for the given criteria"}, status=404) 
 
         # Get request to obtain a range of readings based on inputs > FirstTemp, SecondTemp
         # Create a query that includes an index key:( PETER wants:(get 2 different temp and return between temprature)
         # /readings/?firstTemp=23.00&secondTemp=23.07  
-        if firstTemp and secondTemp:
+        if firstTemp is not None and secondTemp is not None:
+            firstTemp = float(firstTemp)
+            secondTemp = float(secondTemp)
+
             # Construct query to find readings within the temperature range
             query = {'Temperature (°C)': {'$gte': firstTemp, '$lte': secondTemp}}
         
             # Find readings matching the temperature range and sort them by temperature in descending order
             result = Readings.find(query).sort('Temperature (°C)', -1).limit(10)
-
-            list_cur = list(result)
-            returnData = dumps(list_cur)
-        
-        return JsonResponse(returnData, safe=False)
+            listResult = list(result)
+            
+            if not listResult:
+                return JsonResponse({"Success": False, "Message": "No data found for the given criteria"}, status=404)  
+            else:
+                returnData = dumps(listResult)            
+                return JsonResponse({"Success": True, "Data": f"{returnData}"}, status=200, safe=False)           
+    ## End /readings GET
 
     # /readings POST
     if(request.method == "POST"):
