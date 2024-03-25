@@ -20,17 +20,6 @@ Users = db["Users"]
 def index(request):
     return HttpResponse("<h1>Welcome to <u>Weather App API<u>!</h1>")
 
-# def lambda_handler(event, context):
-#     return {
-#         'statusCode': 200,
-#         'headers': {
-#             'Access-Control-Allow-Headers': 'Content-Type',
-#             'Access-Control-Allow-Origin': http//:127.0.0.1:8000
-#             'Access-Control-Allow-Methods': 'OPTIONS, GET, POST, PUT, PATCH, DELETE'
-#         },
-#         'body': json.dumps('Hello from Lambda!')
-#     }
-
 ## ENDPOINT >> UsersView -- for managing users #####
 def UsersView(request):
     ## Load body
@@ -388,7 +377,7 @@ def ReadingsView (request):
             return JsonResponse({"Success": False, "Authorisation role": role, "Message": "Reading not found"}, status=404)
 
         except Exception as e:
-            return JsonResponse({"Success": False, "Authorisation role": role, "Message": str(e)}, status=400)
+            return JsonResponse({"Success": False, "Authorisation role": role, "Message": str(e)}, status=500)
         # END /readings PATCH
 
     # Returns error: method not allowed for any other methods
@@ -601,7 +590,7 @@ def Hash_Password(password):
 
 # Get latitude and longitude for a Sensor
 def GetLatitudeLongitude(deviceName):
-    result = Sensors.find_one({"DeviceName": deviceName})
+    result = Sensors.find_one({"DeviceName": deviceName}, {"Latitude: 1", "Longitude: 1"})
 
     # Return latitude and longitude (if found)
     if result:
