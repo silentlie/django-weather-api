@@ -1,7 +1,7 @@
 import json
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import render
-from bson.json_util import dumps
+from bson.json_util import dumps, loads
 from bson.objectid import ObjectId
 import pymongo
 import datetime
@@ -77,15 +77,14 @@ def UsersView(request):
         
         # Response for malformed request
         return JsonResponse({"Success": False, "Authorisation": "Successful", "Authorisation role": role, 
-                                        "Message": "Request does not contain required information"}, status=400)
+                                        "Message": "Missing parameters (Username, Password, Role are required)"}, status=400)
     ## End /users > POST
     
     # /users > DELETE
     if (request.method == "DELETE"):        
         ## Get data from request ##
         # For deleting a single user:
-        # Get ID from URL paramaters OR username from body
-        id = body.get("ID")
+        # Get username from body
         username = body.get("Username")
 
         # For deleting multiple users of a particular role, with LastLogin within a specified date range
@@ -118,19 +117,10 @@ def UsersView(request):
         
         # Delete one
         # Delete single user (by ID or Username - depending on which is provided)
-        if id or username:
-
-            print(f"ID {id} and username {username}")
-            query = ""
+        if username:
             
-            if id:
-                # Search for the user by ID
-                query = {"_id": ObjectId(id)}
-
-            elif username:
-                # Search for the user by Username
-                query = {"Username": username}
-            
+            # Search for the user by Username
+            query = {"Username": username}
 
             result = Users.delete_one(query)
 
@@ -143,7 +133,7 @@ def UsersView(request):
 
         # Response for malformed request
         return JsonResponse({"Success": False, "Authorisation role": role, 
-                                "Message": "Request does not contain required information"}, status=400)
+                                "Message": "Missing parameters"}, status=400)
     ## End /users > DELETE
 
     # /users > PUT
@@ -198,7 +188,7 @@ def UsersView(request):
         start_id = None
         end_id = None
         
-        if startDate and endDate:
+        if startDate and endDate and currentRole and changedRole:
             # convert date time strings (in format YYYY-MM-DD HH:MM:SS) to datetime object
             startDate = datetime.datetime.strptime(startDate,'%Y-%m-%d')
             print(startDate)
@@ -209,26 +199,59 @@ def UsersView(request):
             end_id = ObjectId.from_datetime(endDate)
             print(end_id)
         
-        query = { "_id": {"$gte": start_id, "$lte": end_id}, "Role": currentRole}
-        
-        result = Users.update_many(query,{"$set": {"Role": changedRole}})
-        changeCount = result.modified_count
+            query = { "_id": {"$gte": start_id, "$lte": end_id}, "Role": currentRole}
+            
+            result = Users.update_many(query,{"$set": {"Role": changedRole}})
+            changeCount = result.modified_count
 
-        if result.modified_count > 0:
-            return JsonResponse({"Success": True, "Authorisation role": role, "Message": f"{changeCount} user roles updated successfully"}, status=200)
-        else:
-            return JsonResponse({"Success": False, "Authorisation role": role, "Message": "No users found for the given criteria"}, status=404)
+            if result.modified_count > 0:
+                return JsonResponse({"Success": True, "Authorisation role": role, "Message": f"{changeCount} user roles updated successfully"}, status=200)
+            else:
+                return JsonResponse({"Success": False, "Authorisation role": role, "Message": "No users found for the given criteria"}, status=404)
+
+    return JsonResponse({"Success": False, "Authorisation role": role,
+        "Message": "Missing parameters (must include startDate, endDate, currentRole, and changedRole)"}, status=400)    
     # End /users > PATCH
 
-    
     # Returns error: method not allowed for any other methods
     return JsonResponse({"Error": "Method not allowed"}, status=405)
 # End ENDPOINT /users
 
 
+def DeleteUser(request, ID):
+    ## Load body
+    body = json.loads(request.body.decode("utf-8"))
+    role = Authorisation(body)
 
-########### ADD IN AN API REQUEST USING OPTIONS ################################3
+    # /users > Authentication and authorisation ##
+    # Allow access to user endpoint requests only if role is Admin or Teacher
+    if role is None:
+        return JsonResponse({"Success": False, "Message": "Authentication failed"}, status=401)
+    if role != "Admin" and role != "Teacher" :
+        return JsonResponse({"Success": False, "Authorisation role": role, "Message": "Authorisation failed"}, status=401)
+    
+    # /users/<str:ID> > DELETE by ID
+    if (request.method == "DELETE"):        
+        ## Get data from to delete a single user by ID:
 
+        # Search for the user by ID
+        query = {"_id": ObjectId(ID)}
+        
+        result = Users.delete_one(query)
+
+        if result.deleted_count > 0:
+            return JsonResponse({"Success": True, "Authorisation role": role, 
+                                    "Message": f"User deleted successfully"}, status=200)
+        else:
+            return JsonResponse({"Success": False, "Authorisation role": role, 
+                                    "Message": "User not found"}, status=404)
+    ## End /users/<str:ID> > DELETE
+    
+    # Returns error: method not allowed for any other methods
+    return JsonResponse({"Error": "Method not allowed"}, status=405)
+
+
+########### ADD IN AN API REQUEST USING OPTIONS ################################
 
 
 ## ENDPOINT >> /readings -- for managing weather readings #####
@@ -242,9 +265,9 @@ def ReadingsView (request):
         firstTemp = request.GET.get('FirstTemp')
         secondTemp = request.GET.get('SecondTemp')
 
-        print(f"Device name {deviceName}, reading time {readingDateTime}, firstTemp {firstTemp}, secondTemp {secondTemp}")
-        if deviceName is  None and readingDateTime is  None and firstTemp is None and secondTemp is None:
-            return JsonResponse({"Success": False, "Message": "Malformed request"}, status=400)
+        #print(f"Device name {deviceName}, reading time {readingDateTime}, firstTemp {firstTemp}, secondTemp {secondTemp}")
+        #if deviceName is  None and readingDateTime is  None and firstTemp is None and secondTemp is None:
+        #    return JsonResponse({"Success": False, "Message": "Missing parameters"}, status=400)
 
         # Get request to obtain specific reading details based on inputs > DeviceName, DateTime
         if deviceName is not None and readingDateTime is not None:
@@ -263,7 +286,7 @@ def ReadingsView (request):
                     "Solar Radiation (W/m2)": reading.get("Solar Radiation (W/m2)", None),
                     "Precipitation mm/h": reading.get("Precipitation mm/h", None)
                 }
-                return JsonResponse({"Success": True, "Data": f"{returnData}"}, status=200)
+                return JsonResponse({"Success": True, "Data": returnData}, status=200)
             else:
                 return JsonResponse({"Success": False, "Message": "No data found for the given criteria"}, status=404) 
 
@@ -280,12 +303,18 @@ def ReadingsView (request):
             # Find readings matching the temperature range and sort them by temperature in descending order
             result = Readings.find(query).sort('Temperature (°C)', -1).limit(10)
             listResult = list(result)
-            
+
+            # Handle the ObjectId not iteratable exception when returning listResult
+            for document in listResult:
+                if "_id" in document:
+                        document["id"] = str(document.pop("_id"))
+
             if not listResult:
                 return JsonResponse({"Success": False, "Message": "No data found for the given criteria"}, status=404)  
             else:
-                returnData = dumps(listResult)            
-                return JsonResponse({"Success": True, "Data": f"{returnData}"}, status=200, safe=False)           
+                return JsonResponse({"Success": True, "Data": listResult}, status=200)
+
+        return JsonResponse({"Success": False, "Message": "Missing parameters"}, status=400)
     ## End /readings GET
 
     # /readings POST
@@ -304,6 +333,7 @@ def ReadingsView (request):
         errCount = 0
         # Count the number of weather readings to be added (this will not include duplicates)
         numRecords = 0
+
         if role is None:
             return JsonResponse({"Success": False, "Message": "Authentication failed"}, status=401)
         if role != "Admin" and role != "Teacher" and role != "Sensor":
@@ -322,11 +352,12 @@ def ReadingsView (request):
         newReadingsList = []
 
         for data in readings:
+            convertedDateTime = datetime.datetime.strptime(data.get("Time"),'%Y-%m-%d %H:%M:%S')
             # Check if reading already exists using Device Name and Time
-            if (Readings.find_one({"Device Name": deviceName,"Time": data["Time"]}) is not None):
+            checkDuplicates = Readings.find_one({"Device Name": deviceName,"Time": convertedDateTime})
+            if checkDuplicates:
                 errCount += 1
             else:
-                convertedDateTime = datetime.datetime.strptime(data.get("Time"),'%Y-%m-%d %H:%M:%S')
                 newReading = {
                         "Device Name": deviceName,
                         "Precipitation mm/h": data.get("Precipitation mm/h"),
@@ -344,25 +375,22 @@ def ReadingsView (request):
                 newReadingsList.append(newReading)
 
         numRecords = len(newReadingsList)
-        print(numRecords)
 
-        if numRecords == 1:
-            result = Readings.insert_one(newReadingsList)
-            
-        elif  numRecords > 1:
-            result = Readings.insert_many(newReadingsList) 
+        if numRecords > 0:
+            if numRecords == 1:
+                result = Readings.insert_one(newReadingsList[0])
                 
-        else:
-            return JsonResponse({"Success": False, "Authorisation role": role, "Message": "Invalid request"}, status=400)
+            elif  numRecords > 1:
+                result = Readings.insert_many(newReadingsList) 
 
-        print(result)
+            if errCount >= 1:
+                errMessage = f" {errCount} duplicate readings not added."
 
-        if errCount > 1:
-            errMessage = f" {errCount} duplicate readings not added."
+            returnMessage = f"{numRecords} readings added successfully.{errMessage}" 
 
-        returnMessage = f"{numRecords} readings added successfully.{errMessage}" 
+            return JsonResponse({"Success": True, "Authorisation role": role, "Message": returnMessage}, status=200)
 
-        return JsonResponse({"Success": True, "Authorisation role": role, "Message": returnMessage}, status=200)
+        return JsonResponse({"Success": True, "Authorisation role": role, "Message": "Duplicate readings cannot be added"}, status=409)
     ## End /readings POST
 
     # /readings PATCH
@@ -379,20 +407,22 @@ def ReadingsView (request):
         if role != "Admin" and role != "Teacher" :
             return JsonResponse({"Success": False, "Authorisation role": role, "Message": "Authorisation failed"}, status=401)
         
-        try:
-            objId = ObjectId(id)
-            # Find the existing reading
-            existing_reading = Readings.find_one({"_id": objId})
+        if id and new_precipitation:
+            try:
+                objId = ObjectId(id)
+                # Find the existing reading
+                existing_reading = Readings.find_one({"_id": objId})
 
-            if existing_reading:
-                existing_reading["Precipitation mm/h"] = new_precipitation
-                Readings.update_one({"_id": objId}, {"$set": existing_reading})
-                return JsonResponse({"Success": True, "Authorisation role": role, "Message": "Reading updated successfully"})
-        
-            return JsonResponse({"Success": False, "Authorisation role": role, "Message": "Reading not found"}, status=404)
+                if existing_reading:
+                    existing_reading["Precipitation mm/h"] = new_precipitation
+                    Readings.update_one({"_id": objId}, {"$set": existing_reading})
+                    return JsonResponse({"Success": True, "Authorisation role": role, "Message": "Reading updated successfully"})
+            
+                return JsonResponse({"Success": False, "Authorisation role": role, "Message": "Reading not found"}, status=404)
 
-        except Exception as e:
-            return JsonResponse({"Success": False, "Authorisation role": role, "Message": str(e)}, status=500)
+            except Exception as e:
+                return JsonResponse({"Success": False, "Authorisation role": role, "Message": str(e)}, status=500)
+        return JsonResponse({"Success": False, "Message": "Missing parameters (requires ReadingID and Precipitation)"}, status=400)
         # END /readings PATCH
 
     # Returns error: method not allowed for any other methods
@@ -439,9 +469,7 @@ def SensorsView(request):
             return JsonResponse({"Success": True, "Authorisation role": role,
                 "Message": f"Sensor {result.inserted_id} successfully added"}, status=200)
         
-        return JsonResponse({"Success": False, "Authorisation role": role, "Message": "Sensor already exists"}, status=409)
-        
-        
+        return JsonResponse({"Success": False, "Authorisation role": role, "Message": "Sensor already exists"}, status=409)     
     ## End /sensors POST
     
     # /sensors > DELETE
@@ -473,10 +501,6 @@ def SensorsView(request):
 
     # Returns error: method not allowed for any other methods
     return JsonResponse({"Error": "Method not allowed"}, status=405)
-
-
-## ENDPOINT >> analysis -- NOT IN USE  #####
-# Uses AnalysisView
 
 
 ## ENDPOINT >> /analysis/max -- for calculating max value of Temperature or Precipitation of readings #####
@@ -567,12 +591,16 @@ def LoginView(request):
     # /login PATCH
     if (request.method == "PATCH"):
         body = json.loads(request.body.decode("utf-8"))
-        result = Authorisation(body)
-        print(result)
 
-        if result:
-            return JsonResponse({"Success": True, "Message": "Authentication successful"}, status=200)
-        return JsonResponse({"Success": False, "Message": "Authentication failed"}, status=400)
+        username = body.get('Authentication', {}).get('Username')
+        password = body.get('Authentication', {}).get('Password')
+
+        if username and password:
+            result = Authorisation(body)
+            if result:
+                return JsonResponse({"Success": True, "Message": "Authentication successful"}, status=200)
+            return JsonResponse({"Success": False, "Message": "Authentication failed"}, status=401)
+        return JsonResponse({"Success": False, "Message": "Missing parameters (requires Username and Password)"}, status=400)    
     ## End /login PATCH
 
     # Returns error: method not allowed for any other methods        
