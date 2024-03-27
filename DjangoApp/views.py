@@ -217,7 +217,56 @@ def UsersView(request):
     return JsonResponse({"Error": "Method not allowed"}, status=405)
 # End ENDPOINT /users
 
+## ENDPOINT >> DeactivateUsers -- for replacing multiple users
+def DeactivateUsers(request):
+    if (request.method == "PUT"):
+        # Load the data from the request body
+        body = json.loads(request.body.decode("utf-8"))
+        role = Authorisation(body)
+        user = []
 
+        # /users > Authentication and authorisation ##
+        # Allow access to user endpoint requests only if role is Admin or Teacher
+        if role is None:
+            return JsonResponse({"Success": False, "Message": "Authentication failed"}, status=401)
+        if role != "Admin" and role != "Teacher" :
+            return JsonResponse({"Success": False, "Authorisation role": role, "Message": "Authorisation failed"}, status=401)
+
+        if "Users" not in body:
+            return JsonResponse({"Success": True, "Authorisation role": role, 
+                                "Message": f"Users missing from request"}, status=400)
+
+        changeUsers = body.get("Users", [])
+
+        updateCount = 0
+
+        # Iterate through the list of dictionaries from Postman data
+        for item in changeUsers:
+            # Get the value associated with the key "Username"
+            username = item.get("Username")
+            user.append(username)
+            user_record = Users.find_one({"Username": username})
+
+            # If the user is found, update its "Active" attribute to False
+            if user_record:
+                # Replace the entire document with the new one where Active is False
+                new_document = {**user_record, "Active": False}  # Update Active to False
+                Users.replace_one({"Username": username}, new_document)
+                updateCount += 1
+
+        if updateCount > 0:
+            return JsonResponse({"Success": True, "Authorisation role": role, 
+                                "Message": f"Users replaced successfully"}, status=200)
+        return JsonResponse({"Success": False, "Authorisation role": role, 
+                                "Message": f"No users found"}, status=404)
+
+    ## End /users/deactivate > PUT
+    
+    # Returns error: method not allowed for any other methods
+    return JsonResponse({"Error": "Method not allowed"}, status=405)
+
+
+## ENDPOINT >> DeleteUser -- for deleting user by ID
 def DeleteUser(request, ID):
     ## Load body
     body = json.loads(request.body.decode("utf-8"))
