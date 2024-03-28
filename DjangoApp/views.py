@@ -300,7 +300,15 @@ def DeleteUser(request, ID):
     return JsonResponse({"Error": "Method not allowed"}, status=405)
 
 
-########### ADD IN AN API REQUEST USING OPTIONS ################################
+def OptionsView(request):
+    """
+    API endpoint that handles OPTIONS requests.
+    """
+    response = JsonResponse({}, status=200)
+    response["Allow"] = "GET, POST, PUT, PATCH, DELETE"
+    response["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE"
+    response["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+    return response
 
 
 ## ENDPOINT >> /readings -- for managing weather readings #####
@@ -625,9 +633,9 @@ def AnalysisMaxView(request):
         
         # No Content
         if dateRange == True:
-            return  JsonResponse({"Success": False, "Message": "No records found within the specified date range"}, status=204)
+            return  JsonResponse({"Success": False, "Message": "No records found within the specified date range"}, status=404)
         elif dateRange == False:               
-            return JsonResponse({"Success": False, "Message": "No records found within last 5 months"}, status=204)
+            return JsonResponse({"Success": False, "Message": "No records found within last 5 months"}, status=404)
     ## End /analysis/max GET
 
     # Returns error: method not allowed for any other methods

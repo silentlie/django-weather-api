@@ -54,6 +54,8 @@ MIDDLEWARE = [
 
 CORS_ALLOWED_ORIGINS = [
     'https://www.google.com.au',
+    'http://localhost:8000',
+    'http://localhost:8001',
 ]
 
 CORS_ALLOW_METHODS = [
