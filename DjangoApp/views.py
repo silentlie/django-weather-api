@@ -7,21 +7,25 @@ import pymongo
 import datetime
 from dateutil.relativedelta import relativedelta   # pip install python-dateutil to import
 import hashlib
-# Create your views here.
+from .models import *
 
-# Connection to the database & collections
-client = pymongo.MongoClient("mongodb+srv://student:student@weatherreadingsdb.hiue8df.mongodb.net/")
-db = client["WeatherDataBase"]
-Readings = db["Readings"]
-Sensors = db["Sensors"]
-Users = db["Users"]
+# Create your views here.
 
 # Just an index holder
 def index(request):
     return HttpResponse("<h1>Welcome to <u>Weather App API<u>!</h1>")
 
-## ENDPOINT >> UsersView -- for managing users #####
+## ENDPOINT >> /users -- for managing users
 def UsersView(request):
+    # /users > OPTIONS
+    if (request.method == "OPTIONS"):
+        response = JsonResponse({}, status=200)
+        response["Allow"] = "GET, POST, PUT, PATCH, DELETE"
+        response["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE"
+        response["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+        return response
+    ## End /users > OPTIONS
+        
     ## Load body
     body = json.loads(request.body.decode("utf-8"))
     role = Authorisation(body)
@@ -32,7 +36,7 @@ def UsersView(request):
         return JsonResponse({"Success": False, "Message": "Authentication failed"}, status=401)
     if role != "Admin" and role != "Teacher" :
         return JsonResponse({"Success": False, "Authorisation role": role, "Message": "Authorisation failed"}, status=401)
-    
+
     # /users > POST
     if (request.method == "POST"):        
         ## Get data from request ##
@@ -45,7 +49,10 @@ def UsersView(request):
 
         ## Process ##
         # Return error message if user already exists
-        if (Users.find_one({"Username": username}) is not None):
+        query = {"Username": username}
+        result = findOneFunction('users', query)
+
+        if (result is not None):
             return JsonResponse({"Success": False, "Authorisation": "Successful", "Authorisation role": role,
                                  "Message": "User already exists"}, status=409)
         
@@ -66,10 +73,11 @@ def UsersView(request):
                 "Role": userRole,
                 "LastLogin": datetime.datetime.now(tz=datetime.timezone.utc),
                 "Token": token,
+                "Active": True
             }
 
             # Insert the new user
-            result = Users.insert_one(newUser)
+            result = insertOneFunction('users', newUser)
 
             # Get the ID of the new user and return success message
             newID = {"Inserted_id": str(result.inserted_id)}
@@ -106,7 +114,8 @@ def UsersView(request):
                 "LastLogin": {"$gte": startDate, "$lte": endDate}
             }
 
-            result = Users.delete_many(query)
+            result = deleteManyFunction('users', query)
+            print(result)
 
             if result.deleted_count > 0:
                 return JsonResponse({"Success": True, "Authorisation role": role, 
@@ -122,7 +131,8 @@ def UsersView(request):
             # Search for the user by Username
             query = {"Username": username}
 
-            result = Users.delete_one(query)
+            result = deleteOneFunction('users', query)
+            print(result)
 
             if result.deleted_count > 0:
                 return JsonResponse({"Success": True, "Authorisation role": role, 
@@ -144,10 +154,10 @@ def UsersView(request):
         
         # Search for the user in the collection
         query = {"Username": body["Username"]}
-        existing_user = Users.find_one(query)
+        result = findOneFunction('users', query)
 
         # If the use is not found return an error
-        if existing_user is None:
+        if result is None:
             return JsonResponse({"Success": False, "Authorisation role": role, "Message": "User not found"}, status=404)
         
         #Update the user data
@@ -164,7 +174,7 @@ def UsersView(request):
 
         update_data["LastLogin"] = datetime.datetime.now(datetime.timezone.utc)
 
-        result = Users.update_one(query, {"$set": update_data})
+        result = updateOneFunction('users', query, {"$set": update_data})
         if result.modified_count > 0:
             return JsonResponse({"Success": True, "Authorisation role": role,
                                    "Message": "User details updated successfully"}, status=200)
@@ -201,31 +211,39 @@ def UsersView(request):
         
             query = { "_id": {"$gte": start_id, "$lte": end_id}, "Role": currentRole}
             
-            result = Users.update_many(query,{"$set": {"Role": changedRole}})
-            changeCount = result.modified_count
+            result = updateManyFunction('users', query, {"$set": {"Role": changedRole}})
 
             if result.modified_count > 0:
-                return JsonResponse({"Success": True, "Authorisation role": role, "Message": f"{changeCount} user roles updated successfully"}, status=200)
+                return JsonResponse({"Success": True, "Authorisation role": role, "Message": f"{result.modified_count} user roles updated successfully"}, status=200)
             else:
                 return JsonResponse({"Success": False, "Authorisation role": role, "Message": "No users found for the given criteria"}, status=404)
 
-    return JsonResponse({"Success": False, "Authorisation role": role,
-        "Message": "Missing parameters (must include startDate, endDate, currentRole, and changedRole)"}, status=400)    
-    # End /users > PATCH
+        return JsonResponse({"Success": False, "Authorisation role": role,
+            "Message": "Missing parameters (must include startDate, endDate, currentRole, and changedRole)"}, status=400)    
+        # End /users > PATCH
 
     # Returns error: method not allowed for any other methods
     return JsonResponse({"Error": "Method not allowed"}, status=405)
 # End ENDPOINT /users
 
-## ENDPOINT >> DeactivateUsers -- for replacing multiple users
+## ENDPOINT >> /users/deactivate -- for replacing multiple users
 def DeactivateUsers(request):
+    # /users/deactivate > OPTIONS
+    if (request.method == "OPTIONS"):
+        response = JsonResponse({}, status=200)
+        response["Allow"] = "GET, POST, PUT, PATCH, DELETE"
+        response["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE"
+        response["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+        return response
+    ## End /users > OPTIONS
+    
     if (request.method == "PUT"):
         # Load the data from the request body
         body = json.loads(request.body.decode("utf-8"))
         role = Authorisation(body)
         user = []
 
-        # /users > Authentication and authorisation ##
+        # /users/deactivate > Authentication and authorisation ##
         # Allow access to user endpoint requests only if role is Admin or Teacher
         if role is None:
             return JsonResponse({"Success": False, "Message": "Authentication failed"}, status=401)
@@ -245,13 +263,14 @@ def DeactivateUsers(request):
             # Get the value associated with the key "Username"
             username = item.get("Username")
             user.append(username)
-            user_record = Users.find_one({"Username": username})
+
+            user_record = findOneFunction('users', {"Username": username})
 
             # If the user is found, update its "Active" attribute to False
             if user_record:
                 # Replace the entire document with the new one where Active is False
                 new_document = {**user_record, "Active": False}  # Update Active to False
-                Users.replace_one({"Username": username}, new_document)
+                replaceOneFunction('users', {"Username": username}, new_document)
                 updateCount += 1
 
         if updateCount > 0:
@@ -264,10 +283,19 @@ def DeactivateUsers(request):
     
     # Returns error: method not allowed for any other methods
     return JsonResponse({"Error": "Method not allowed"}, status=405)
+## End ENDPOINT >> /users/deactivate
 
-
-## ENDPOINT >> DeleteUser -- for deleting user by ID
+## ENDPOINT >> /user/<str:ID> -- for deleting user by ID
 def DeleteUser(request, ID):
+    # /users/<str:ID> > OPTIONS
+    if (request.method == "OPTIONS"):
+        response = JsonResponse({}, status=200)
+        response["Allow"] = "GET, POST, PUT, PATCH, DELETE"
+        response["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE"
+        response["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+        return response
+    ## End /users/<str:ID> > OPTIONS
+    
     ## Load body
     body = json.loads(request.body.decode("utf-8"))
     role = Authorisation(body)
@@ -286,7 +314,7 @@ def DeleteUser(request, ID):
         # Search for the user by ID
         query = {"_id": ObjectId(ID)}
         
-        result = Users.delete_one(query)
+        result = deleteOneFunction('users', query)
 
         if result.deleted_count > 0:
             return JsonResponse({"Success": True, "Authorisation role": role, 
@@ -298,21 +326,19 @@ def DeleteUser(request, ID):
     
     # Returns error: method not allowed for any other methods
     return JsonResponse({"Error": "Method not allowed"}, status=405)
+## End ENDPINT >> /user/<str:ID>
 
-
-def OptionsView(request):
-    """
-    API endpoint that handles OPTIONS requests.
-    """
-    response = JsonResponse({}, status=200)
-    response["Allow"] = "GET, POST, PUT, PATCH, DELETE"
-    response["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE"
-    response["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
-    return response
-
-
-## ENDPOINT >> /readings -- for managing weather readings #####
+## ENDPOINT >> /readings -- for managing weather readings
 def ReadingsView (request):
+    # /readings > OPTIONS
+    if (request.method == "OPTIONS"):
+        response = JsonResponse({}, status=200)
+        response["Allow"] = "GET, POST, PUT, PATCH, DELETE"
+        response["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE"
+        response["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+        return response
+    ## End /readings > OPTIONS
+
     # /readings GET
     if(request.method == "GET"):
 
@@ -332,7 +358,8 @@ def ReadingsView (request):
             # convert date time string (in format YYYY-MM-DD HH:MM:SS) to datetime object
             convertedDateTime = datetime.datetime.strptime(readingDateTime,'%Y-%m-%d %H:%M:%S')
 
-            reading = Readings.find_one({"Device Name": deviceName, "Time": convertedDateTime})
+            query = {"Device Name": deviceName, "Time": convertedDateTime}
+            reading = findOneFunction('readings', query)
 
             print(reading)
             # Return temperature, atmospheric pressure, radiation & precipitation (if found)
@@ -348,7 +375,7 @@ def ReadingsView (request):
                 return JsonResponse({"Success": False, "Message": "No data found for the given criteria"}, status=404) 
 
         # Get request to obtain a range of readings based on inputs > FirstTemp, SecondTemp
-        # Create a query that includes an index key:( PETER wants:(get 2 different temp and return between temprature)
+        # Create a query that includes an index key> get 2 different temp and return between temperature
         # /readings/?firstTemp=23.00&secondTemp=23.07  
         if firstTemp is not None and secondTemp is not None:
             firstTemp = float(firstTemp)
@@ -358,7 +385,7 @@ def ReadingsView (request):
             query = {'Temperature (°C)': {'$gte': firstTemp, '$lte': secondTemp}}
         
             # Find readings matching the temperature range and sort them by temperature in descending order
-            result = Readings.find(query).sort('Temperature (°C)', -1).limit(10)
+            result = findManyFunction('readings', query, 'Temperature (°C)', -1, 10)
             listResult = list(result)
 
             # Handle the ObjectId not iteratable exception when returning listResult
@@ -397,7 +424,8 @@ def ReadingsView (request):
             return JsonResponse({"Success": False, "Authorisation role": role, "Message": "Authorisation failed"}, status=401)
 
         # Return error message if Device does not exist
-        if (Sensors.find_one({"DeviceName": deviceName}) is None):
+        result = findOneFunction('sensors', {"DeviceName": deviceName})
+        if (result is None):
             return JsonResponse({"Success": False, "Authorisation role": role, "Message": "Sensor(device) does not exist"}, status=404)
        
         # Use device name to get latitude and longitude
@@ -411,7 +439,8 @@ def ReadingsView (request):
         for data in readings:
             convertedDateTime = datetime.datetime.strptime(data.get("Time"),'%Y-%m-%d %H:%M:%S')
             # Check if reading already exists using Device Name and Time
-            checkDuplicates = Readings.find_one({"Device Name": deviceName,"Time": convertedDateTime})
+            query = {"Device Name": deviceName,"Time": convertedDateTime}
+            checkDuplicates = findOneFunction('readings', query)
             if checkDuplicates:
                 errCount += 1
             else:
@@ -435,10 +464,10 @@ def ReadingsView (request):
 
         if numRecords > 0:
             if numRecords == 1:
-                result = Readings.insert_one(newReadingsList[0])
+                result = insertOneFunction('readings', newReadingsList[0]) 
                 
             elif  numRecords > 1:
-                result = Readings.insert_many(newReadingsList) 
+                result = insertManyFunction('readings', newReadingsList)
 
             if errCount >= 1:
                 errMessage = f" {errCount} duplicate readings not added."
@@ -467,12 +496,13 @@ def ReadingsView (request):
         if id and new_precipitation:
             try:
                 objId = ObjectId(id)
+                query = {"_id": objId}
                 # Find the existing reading
-                existing_reading = Readings.find_one({"_id": objId})
+                existing_reading = findOneFunction('readings', query)
 
                 if existing_reading:
                     existing_reading["Precipitation mm/h"] = new_precipitation
-                    Readings.update_one({"_id": objId}, {"$set": existing_reading})
+                    updateOneFunction('readings', {"_id": objId}, {"$set": existing_reading})
                     return JsonResponse({"Success": True, "Authorisation role": role, "Message": "Reading updated successfully"})
             
                 return JsonResponse({"Success": False, "Authorisation role": role, "Message": "Reading not found"}, status=404)
@@ -486,10 +516,17 @@ def ReadingsView (request):
     return JsonResponse({"Error": "Method not allowed"}, status=405)
 ## End ENDPOINT >> /readings
 
-
-## ENDPOINT >> /sensors -- for managing sensors ##
-# /sensors POST
+## ENDPOINT >> /sensors -- for managing sensors
 def SensorsView(request):
+    # /sensors > OPTIONS
+    if (request.method == "OPTIONS"):
+        response = JsonResponse({}, status=200)
+        response["Allow"] = "GET, POST, PUT, PATCH, DELETE"
+        response["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE"
+        response["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+        return response
+    ## End /sensors > OPTIONS
+
     # /sensors > POST
     if (request.method == "POST"):
         body = json.loads(request.body.decode("utf-8"))
@@ -505,7 +542,7 @@ def SensorsView(request):
         if role != "Admin" :
             return JsonResponse({"Success": False, "Authorisation role": role, "Message": "Authorisation failed"}, status=401)  
 
-        sensor = Sensors.find_one({"DeviceName": body["DeviceName"]})
+        sensor = findOneFunction('sensors', {"DeviceName": body["DeviceName"]})
 
         # Return error message if sensor already exists
         if sensor is None:
@@ -521,7 +558,7 @@ def SensorsView(request):
                     "Message": "Request must include 'DeviceName', 'Latitute', and 'Longitude'"}, status=400)
 
             # Insert the new sensor
-            result = Sensors.insert_one(newSensor)
+            result = insertOneFunction('sensors', newSensor)
 
             return JsonResponse({"Success": True, "Authorisation role": role,
                 "Message": f"Sensor {result.inserted_id} successfully added"}, status=200)
@@ -545,9 +582,9 @@ def SensorsView(request):
             return JsonResponse({"Success": False, "Authorisation role": role, "Message": "DeviceName not provided"}, status=400)
         
         # Search for the username in the collection
-        sensorToDelete = {"DeviceName": body["DeviceName"]}
+        query = {"DeviceName": body["DeviceName"]}
 
-        result = Sensors.delete_one(sensorToDelete)
+        result = deleteOneFunction('sensors', query)
 
         if result.deleted_count > 0:    
             return JsonResponse({"Success": True, "Authorisation role": role, "Message": f"Sensor {result.deleted_count} successfully deleted"}, status=200)
@@ -558,10 +595,18 @@ def SensorsView(request):
 
     # Returns error: method not allowed for any other methods
     return JsonResponse({"Error": "Method not allowed"}, status=405)
+## End ENDPOINT >> /sensors
 
-
-## ENDPOINT >> /analysis/max -- for calculating max value of Temperature or Precipitation of readings #####
+## ENDPOINT >> /analysis/max -- for calculating max value of Temperature or Precipitation of readings
 def AnalysisMaxView(request):
+    # /analysis/max > OPTIONS
+    if (request.method == "OPTIONS"):
+        response = JsonResponse({}, status=200)
+        response["Allow"] = "GET, POST, PUT, PATCH, DELETE"
+        response["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE"
+        response["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+        return response
+    ## End /analysis/max > OPTIONS
 
     # /analysis/max GET
     if(request.method == "GET"):
@@ -603,10 +648,13 @@ def AnalysisMaxView(request):
                 "Time": {"$gte": startDate, "$lte": endDate}
             }
 
-        print(dateFilter)
+        # Order field based on findField
+        if findField == "Precipitation":
+            filterBy = 'Precipitation mm/h'
+        filterBy = 'Temperature (°C)'
 
         # Query the Readings collection
-        maximumReading = Readings.find(dateFilter).sort('Precipitation mm/h', -1).limit(1)
+        maximumReading = findManyFunction('readings', dateFilter, filterBy, -1, 1)
 
         # Initialise returnData and errorMessage to None
         returnData = None
@@ -640,9 +688,9 @@ def AnalysisMaxView(request):
 
     # Returns error: method not allowed for any other methods
     return JsonResponse({"Error": "Method not allowed"}, status=405)        
+## End ENDPOINT >> /analysis/max
 
-
-## ENDPOINT >> /login -- for managing user login #####
+## ENDPOINT >> /login -- for managing user login
 # This is the login endpoint, right now it works like checking if the account is legit
 def LoginView(request):
     # /login PATCH
@@ -662,6 +710,7 @@ def LoginView(request):
 
     # Returns error: method not allowed for any other methods        
     return JsonResponse({"Error": "Method not allowed"}, status=405)
+## End ENDPOINT >> /login
 
 ## FUNCTIONS #########################################################################################
 # Check point function of every request for Authorisation
@@ -673,19 +722,15 @@ def Authorisation(body):
         "Username": username,
         "Password": hashed_password
     }
-    print(user)
-    result = Users.find_one(user)
+    result = findOneFunction('users', user)
     # Return role from the user (if found)
     if result:
         # Update the last login date for the user
         update_data = {
             "LastLogin": datetime.datetime.now(datetime.timezone.utc)
         }
-        Users.update_one(user, {"$set": update_data})
-        #role = {
-        #    "Role": result.get("Role", None),
-        #}
-        # Save the role > return this
+        updateOneFunction('users', user, {"$set": update_data})
+
         role = result.get("Role", None)
         return role
     return None
@@ -702,7 +747,9 @@ def Hash_Password(password):
 
 # Get latitude and longitude for a Sensor
 def GetLatitudeLongitude(deviceName):
-    result = Sensors.find_one({"DeviceName": deviceName}, {"Latitude: 1", "Longitude: 1"})
+    query = {"DeviceName": deviceName}
+    projection = {"Latitude: 1", "Longitude: 1"}
+    result = findOneFunction('sensors', query, projection)
 
     # Return latitude and longitude (if found)
     if result:

@@ -77,6 +77,7 @@ CORS_ALLOW_HEADERS = [
     'user-agent',
     'x-csrftoken',
     'x-requested-with',
+    'custom-header',
 ]
 
 ROOT_URLCONF = 'DjangoWeatherAPI.urls'
